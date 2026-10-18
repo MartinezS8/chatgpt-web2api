@@ -46,7 +46,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = commands.add_parser("claim", help="Atomically reserve one eligible task without sending it")
     s.add_argument("--project", required=True)
     s.add_argument("--max-slots", type=int, default=5)
-    s = commands.add_parser("recover", help="Requeue pre-send tasks; mark uncertain sends for review")
+    s = commands.add_parser("recover", help="Requeue only expired pre-send leases; quarantine uncertain sends")
     s.add_argument("--project", required=True)
     return p
 
@@ -61,7 +61,17 @@ def _capabilities() -> dict:
         "supabase_or_github_writes": False,
         "independent_evidence_verification": "required-before-completion",
         "unknown_delivery_retry": "human-reconciliation-only",
+        "dispatch_fencing": "claim-token-cas-and-expiring-presend-lease",
+        "write_scope_locking": "sqlite-global-conservative",
+        "review_gate": "verified-state-requires-explicit-finalization",
     }
+
+
+def _public_task(row: dict | None) -> dict | None:
+    """Do not disclose fencing tokens through generic CLI listing commands."""
+    if row is None:
+        return None
+    return {key: value for key, value in row.items() if key != "claim_token"}
 
 
 def execute(args: argparse.Namespace) -> dict:
@@ -82,12 +92,12 @@ def execute(args: argparse.Namespace) -> dict:
                 "states": dict(Counter(t["state"] for t in rows)),
                 "occupied_slots": sorted(t["slot"] for t in rows if t["slot"] is not None)}
     if args.command == "list-tasks":
-        return {"project": args.project, "tasks": store.all(args.project)}
+        return {"project": args.project, "tasks": [_public_task(r) for r in store.all(args.project)]}
     if args.command == "task":
         row = store.get(args.id)
         if row is None:
             raise ValueError(f"unknown task: {args.id}")
-        return row
+        return _public_task(row)
     if args.command == "events":
         if store.get(args.id) is None:
             raise ValueError(f"unknown task: {args.id}")
@@ -108,7 +118,7 @@ def execute(args: argparse.Namespace) -> dict:
                 "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
                 "prompt_stored": False}
     if args.command == "claim":
-        return {"project": args.project, "reserved": store.claim(args.project, max_slots=args.max_slots)}
+        return {"project": args.project, "reserved": _public_task(store.claim(args.project, max_slots=args.max_slots))}
     if args.command == "recover":
         return {"project": args.project, "uncertain_dispatches": store.recover(args.project),
                 "automatic_resend": False}
