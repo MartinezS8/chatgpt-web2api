@@ -42,6 +42,7 @@ class OrchestratorCLI(unittest.TestCase):
         self.assertFalse(result["data"]["created"])
         code, result = self.run_cli("claim", "--project", "demo")
         self.assertEqual(result["data"]["reserved"]["slot"], 1)
+        self.assertNotIn("claim_token", result["data"]["reserved"])
         code, result = self.run_cli("status", "--project", "demo")
         self.assertEqual(result["data"]["occupied_slots"], [1])
         code, result = self.run_cli("events", "--id", "task-1")
@@ -68,7 +69,7 @@ class OrchestratorCLI(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(result["data"]["uncertain_dispatches"], 0)
         code, result = self.run_cli("task", "--id", "task-1")
-        self.assertEqual(result["data"]["state"], "queued")
+        self.assertEqual(result["data"]["state"], "reserved")
 
     def test_prompt_file_size_limit(self):
         self.prompt_file.write_bytes(b"x" * (1024 * 1024 + 1))
