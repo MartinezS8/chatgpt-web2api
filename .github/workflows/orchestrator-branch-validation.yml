@@ -43,7 +43,7 @@ jobs:
         env:
           REVIEWED_HEAD_SHA: ${{ github.sha }}
           W2A_E2E_RUN: '0'
-        run: python scripts/verify_orchestrator.py --full --strict --expected-sha "$REVIEWED_HEAD_SHA"
+        run: python scripts/verify_orchestrator.py --full --strict --diagnostics --expected-sha "$REVIEWED_HEAD_SHA"
 
   package-build:
     name: package build (diagnostic)
