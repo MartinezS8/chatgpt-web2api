@@ -14,6 +14,8 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 8. [PR #8](https://github.com/MartinezS8/chatgpt-web2api/pull/8): sealed-package mock upload receipts and per-message app/model capability gate → PR #7 (Draft).
 9. [PR #10](https://github.com/MartinezS8/chatgpt-web2api/pull/10): independent integration hardening for observer, worker recovery and mock upload preflight → PR #8 (Draft).
 10. [PR #12](https://github.com/MartinezS8/chatgpt-web2api/pull/12): bind mock GitHub evidence to canonical task repository lock, require completed CI, redact callback messages → PR #10 (Draft).
+11. [PR #14](https://github.com/MartinezS8/chatgpt-web2api/pull/14): independent mock reviewer identity, role, account, project and session constraints → PR #12 (Draft).
+12. [PR #15](https://github.com/MartinezS8/chatgpt-web2api/pull/15): **disable untrusted assertion-only finalization**, prove unresolved write scopes stay locked; include latest PR #5 ancestry via a no-content-change merge → PR #14 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -131,6 +133,16 @@ See [integration review](ORCHESTRATOR_REVIEW_PR08_PR10.md). Issues and GitHub Ac
 - [x] Two negative regression cases committed for cross-account, project mismatch, shared session and disabled implementer.
 - [ ] Run full stacked PR #1→#14 suite, Ruff and Python 3.11/3.12 Windows matrix. **No fresh CI run is claimed by PR #14.**
 - [ ] Actual provider-signed review provenance, GitHub CI/PR HEAD revalidation, removal of legacy finalize bypass and authorized transport preflight remain mandatory.
+
+
+## P0 follow-up review — fail-closed finalization (PR #15)
+
+- [x] Disable `Store.finalize_verified` assertion-only approval path: it now always raises `PermissionError`, without releasing locks or advancing dependencies. See [PR-13 findings and implementation spec](ORCHESTRATOR_PR13_FINALIZATION_GATE.md).
+- [x] Keep legacy tests honest: fake or privileged-sounding reviewer/operator strings no longer finalize; isolated V4 regression run **33 passed + 8 subtests**.
+- [x] Synchronize latest PR #5 ancestry **in PR #15 descendant only** after verifying worker scheduler code and tests were blob-identical; PR #6–#14 still need merge-base checks.
+- [ ] Build a *single trusted* provider-authenticated finalizer that compares current GitHub PR head, CI SHA/status, independent reviewer identity and required human approval immediately before a fenced SQLite transition. No automatic finish without this gate.
+- [ ] Disable or gate `Controller.dispatch` legacy direct send before attaching any non-mock transport; the sealed TaskPackages/WorkerRegistry/DispatchOutbox must be the exclusive live-write path.
+- [ ] Full current PR #1→#15 combined tests, Ruff, Windows, Python 3.11/3.12 and upstream tests; current 33 tests are deliberately **not** claimed as complete integration evidence.
 
 ## PR-08 (P2) — Windows lifecycle and release
 
