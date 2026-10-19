@@ -4,10 +4,12 @@ These integration cases require the full stacked checkout.
 """
 import base64
 import hashlib
+
 import pytest
+from test_orchestrator_github_readonly_evidence import SHA, FakeGitHubReader
+
 from chatgpt_web2api.orchestrator.github_readonly_evidence import GitHubReadOnlyEvidence
 from chatgpt_web2api.orchestrator.workflow_source_pin import WorkflowSourcePin
-from test_orchestrator_github_readonly_evidence import FakeGitHubReader, SHA
 
 PATH = ".github/workflows/ci.yml"
 BODY = b"name: CI\non: push\njobs:\n  lint:\n    runs-on: ubuntu-latest\n"

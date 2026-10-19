@@ -1,8 +1,8 @@
 """Offline behavioral tests; no browser, ChatGPT or GitHub credentials needed."""
 import concurrent.futures
 import sqlite3
-import time
 import tempfile
+import time
 import unittest
 from contextlib import closing
 from pathlib import Path

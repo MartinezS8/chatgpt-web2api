@@ -2,15 +2,15 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import replace
 
 import pytest
+from test_orchestrator_provider_evidence import SHA, STAMP
+from test_orchestrator_task_review_evidence import record, seed
 
 from chatgpt_web2api.orchestrator.implementer_provenance import (
-    GitHubSignedCommitReader, ImplementerProvenanceLedger,
+    GitHubSignedCommitReader,
+    ImplementerProvenanceLedger,
 )
-from test_orchestrator_provider_evidence import SHA, STAMP, store
-from test_orchestrator_task_review_evidence import seed, record
 
 
 class Commits:
@@ -44,11 +44,12 @@ def source(db, commits=None, *, id=55, worker="dev", policy=None, now=STAMP):
     commits = commits or Commits()
     adapter = GitHubSignedCommitReader(owner="Acme", repo="repo", repository_id=137,
                                        reader=commits, now=lambda: now)
+    from test_orchestrator_provider_evidence import FakeReader, gate
+    from test_orchestrator_task_review_evidence import Reviewer
+
     from chatgpt_web2api.orchestrator.github_readonly_reviews import GitHubReadOnlyReviews
     from chatgpt_web2api.orchestrator.provider_evidence import ProviderEvidenceLedger
-    from test_orchestrator_provider_evidence import gate, FakeReader
     from chatgpt_web2api.orchestrator.task_review_evidence import TaskReviewEvidenceLedger
-    from test_orchestrator_task_review_evidence import Reviewer
     ci = ProviderEvidenceLedger(db,gate(FakeReader()),now=lambda:STAMP)
     review = TaskReviewEvidenceLedger(db, ci, GitHubReadOnlyReviews(
         owner="Acme",repo="repo", repository_id=137, reader=Reviewer(),

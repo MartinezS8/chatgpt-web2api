@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-from types import SimpleNamespace
-
 import pytest
 
 from chatgpt_web2api.orchestrator.store import Store, TaskSpec

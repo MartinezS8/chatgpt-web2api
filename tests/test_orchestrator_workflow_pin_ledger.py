@@ -10,15 +10,14 @@ import json
 from dataclasses import replace
 
 import pytest
+from test_orchestrator_provider_evidence import SHA, STAMP, FakeReader, inspect
+from test_orchestrator_task_review_evidence import Reviewer
 
 from chatgpt_web2api.orchestrator.github_readonly_evidence import GitHubReadOnlyEvidence
 from chatgpt_web2api.orchestrator.github_readonly_reviews import GitHubReadOnlyReviews
 from chatgpt_web2api.orchestrator.provider_evidence import ProviderEvidenceLedger
 from chatgpt_web2api.orchestrator.task_review_evidence import TaskReviewEvidenceLedger
 from chatgpt_web2api.orchestrator.workflow_source_pin import WorkflowSourcePin
-from test_orchestrator_provider_evidence import FakeReader, SHA, STAMP, inspect, store
-from test_orchestrator_task_review_evidence import Reviewer
-
 
 WORKFLOW_PATH = ".github/workflows/ci.yml"
 SOURCE = b"name: verified-mock-CI\non: push\njobs: {}\n"

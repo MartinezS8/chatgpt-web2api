@@ -9,9 +9,10 @@ from __future__ import annotations
 import json
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Callable, Protocol
+from datetime import UTC, datetime
+from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -139,7 +140,7 @@ class GitHubReadOnlyReviews:
             raise ValueError("malformed review submission time") from None
         if timestamp.tzinfo is None:
             raise ValueError("review submission time missing timezone")
-        return timestamp.astimezone(timezone.utc)
+        return timestamp.astimezone(UTC)
 
     def inspect(self, *, pr_number: int, expected_head_sha: str,
                 implementer_user_id: int) -> ReviewObservation:

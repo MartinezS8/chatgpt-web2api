@@ -192,9 +192,10 @@ def test_reviewer_rejects_disabled_or_cross_project_implementer(db,evid):
     ledger=ReviewLedger(db)
     with db._connect() as d:
         d.execute("UPDATE orchestrator_workers SET enabled=0 WHERE worker_id='dev'")
-    with pytest.raises(ValueError,match="identity, account, project or session"):
+    with pytest.raises(ValueError, match="enabled mock review worker"):
         ledger.record_mock(target_task_id="build",reviewer_task_id="review-1",
                            head_sha=SHA,decision="approved")
+    assert ledger.get("build", "review-1") is None
     with db._connect() as d:
         d.execute("UPDATE orchestrator_workers SET enabled=1 WHERE worker_id='dev'")
         d.execute("UPDATE tasks SET project_id='another' WHERE task_id='review-1'")
