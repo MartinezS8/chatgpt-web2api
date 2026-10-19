@@ -37,3 +37,24 @@ class TestWorkerCommands(unittest.TestCase):
             args=parser.parse_args(['register-worker','--id','w','--account','acct','--project','p',
                                       '--session-key','session-1','--role','implement','--transport','chatgpt_ui','--disabled'])
             self.assertTrue(execute_worker_command(args,store)['created'])
+
+
+def test_existing_cli_dispatches_worker_commands_without_external_actions(tmp_path):
+    from chatgpt_web2api.orchestrator.cli import build_parser, execute
+
+    parser = build_parser()
+    args = parser.parse_args(["worker-capabilities"])
+    caps = execute(args)
+    assert caps["remote_generations_available"] == 0
+    db = tmp_path / "controller.db"
+    args = parser.parse_args([
+        "--db", str(db), "register-worker", "--id", "worker-1",
+        "--account", "personal", "--project", "p", "--role", "implement",
+        "--session-key", "fake:worker-1",
+    ])
+    assert execute(args)["created"] is True
+    assert db.is_file()
+    listed = execute(parser.parse_args([
+        "--db", str(db), "list-workers", "--account", "personal",
+    ]))
+    assert len(listed["workers"]) == 1
