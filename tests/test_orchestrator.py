@@ -93,10 +93,11 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(control.poll("sample"), ["a"])
         self.assertEqual(self.db.get("a")["state"], "verified")
         self.assertIsNotNone(self.db.get("a")["slot"])
-        self.assertTrue(self.db.finalize_verified("a", claim_token=self.db.get("a")["claim_token"],
-                                                   reviewer_ref="review:independent-commit", approved_by="operator"))
-        self.assertEqual(self.db.get("a")["state"], "finished")
-        self.assertIsNone(self.db.get("a")["slot"])
+        with self.assertRaisesRegex(PermissionError, "finalization is disabled"):
+            self.db.finalize_verified("a", claim_token=self.db.get("a")["claim_token"],
+                                      reviewer_ref="review:independent-commit", approved_by="operator")
+        self.assertEqual(self.db.get("a")["state"], "verified")
+        self.assertIsNotNone(self.db.get("a")["slot"])
 
     def test_no_self_reported_success_by_default(self):
         self.task("a")
@@ -165,8 +166,9 @@ class OrchestratorTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.db.transition("a", TaskState.NEEDS_HUMAN, TaskState.FINISHED,
                                claim_token=token)
-        self.assertFalse(self.db.finalize_verified("a", claim_token=token,
-                        reviewer_ref="review:arbitrary", approved_by="operator"))
+        with self.assertRaises(PermissionError):
+            self.db.finalize_verified("a", claim_token=token,
+                                      reviewer_ref="review:arbitrary", approved_by="operator")
 
     def test_cross_project_global_resource_exclusion(self):
         self.db.create(TaskSpec("a", "project-1", "implement", "hello", write_scopes=("db:prod",)))
@@ -243,12 +245,13 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(control.poll("sample"), ["a"])
         self.assertIsNone(self.db.claim("sample"))
         token = self.db.get("a")["claim_token"]
-        with self.assertRaises(ValueError):
-            self.db.finalize_verified("a", claim_token=token,
-                                      reviewer_ref="", approved_by="operator")
-        self.db.finalize_verified("a", claim_token=token,
-                                  reviewer_ref="review:commit", approved_by="operator")
-        self.assertEqual(self.db.claim("sample")["task_id"], "b")
+        for reviewer, operator in (("", "operator"), ("review:commit", "operator"),
+                                   ("review:commit", "root")):
+            with self.assertRaises(PermissionError):
+                self.db.finalize_verified("a", claim_token=token,
+                                          reviewer_ref=reviewer, approved_by=operator)
+        self.assertEqual(self.db.get("a")["state"], "verified")
+        self.assertIsNone(self.db.claim("sample"))  # unresolved write lock stays held
 
     def test_reserved_lease_expiration_prevents_send_intent(self):
         self.task("a")
