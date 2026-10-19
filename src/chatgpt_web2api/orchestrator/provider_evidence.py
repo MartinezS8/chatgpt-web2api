@@ -38,6 +38,8 @@ class ProviderEvidenceLedger:
         self.store, self.gate, self.now = store, gate, now
         self.max_age_seconds = max_age_seconds
         with store._connect() as db:
+            # Serialize additive schema upgrades across separate processes.
+            db.execute("BEGIN IMMEDIATE")
             db.execute("""CREATE TABLE IF NOT EXISTS orchestrator_provider_observations (
                 task_id TEXT PRIMARY KEY REFERENCES tasks(task_id),
                 attempt_id TEXT NOT NULL UNIQUE,
@@ -47,8 +49,14 @@ class ProviderEvidenceLedger:
                 package_sha256 TEXT NOT NULL, result_sha256 TEXT NOT NULL,
                 claim_version INTEGER NOT NULL, digest TEXT NOT NULL,
                 assurance TEXT NOT NULL CHECK(assurance='provider_read_only_unreviewed'),
-                observed_at REAL NOT NULL
+                observed_at REAL NOT NULL,
+                workflow_blob_sha TEXT
             )""")
+            columns = {row["name"] for row in db.execute(
+                "PRAGMA table_info(orchestrator_provider_observations)")}
+            if "workflow_blob_sha" not in columns:
+                db.execute("""ALTER TABLE orchestrator_provider_observations
+                    ADD COLUMN workflow_blob_sha TEXT""")
 
     def _binding(self, db, task_id: str, attempt_id: str) -> dict:
         task = db.execute("SELECT * FROM tasks WHERE task_id=?", (task_id,)).fetchone()
@@ -104,12 +112,25 @@ class ProviderEvidenceLedger:
                 provider.repository_id != self.gate.repository_id):
             raise ValueError("provider observation cannot be used as permission")
 
+        # This identity is provided by controller policy and checked source
+        # bytes, not by a worker-authored report.
+        pin = self.gate.workflow_source_pin
+        workflow_blob_sha = provider.workflow_blob_sha
+        if pin is not None:
+            if workflow_blob_sha != pin.trusted_blob_sha:
+                raise ValueError("trusted workflow source pin is missing or mismatched")
+        elif workflow_blob_sha is not None:
+            raise ValueError("unpinned CI gate cannot report verified workflow source")
         data = {**before, "repository_id": provider.repository_id,
                 "pr_number": provider.pr_number,
                 "head_sha": provider.head_sha,
                 "run_id": provider.run_id, "workflow_id": provider.workflow_id,
                 "run_attempt": provider.run_attempt,
                 "assurance": "provider_read_only_unreviewed"}
+        # Preserve legacy unpinned V23 digests; bind any verified source to
+        # the immutable task/attempt CI receipt.
+        if workflow_blob_sha is not None:
+            data["workflow_blob_sha"] = workflow_blob_sha
         digest = _digest(data)
         with self.store._connect() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -121,7 +142,8 @@ class ProviderEvidenceLedger:
             old = db.execute("""SELECT * FROM orchestrator_provider_observations
                 WHERE task_id=?""", (task_id,)).fetchone()
             if old is not None:
-                if old["digest"] != digest or old["attempt_id"] != attempt_id:
+                if (old["digest"] != digest or old["attempt_id"] != attempt_id
+                        or old["workflow_blob_sha"] != workflow_blob_sha):
                     raise ValueError("provider evidence already sealed for different inputs")
                 recorded_at, created = old["observed_at"], False
             else:
@@ -129,19 +151,20 @@ class ProviderEvidenceLedger:
                 db.execute("""INSERT INTO orchestrator_provider_observations
                     (task_id,attempt_id,repository_id,pr_number,head_sha,run_id,
                      workflow_id,run_attempt,package_sha256,result_sha256,
-                     claim_version,digest,assurance,observed_at)
-                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     claim_version,digest,assurance,observed_at,workflow_blob_sha)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (task_id,attempt_id,provider.repository_id,provider.pr_number,
                      provider.head_sha,provider.run_id,provider.workflow_id,
                      provider.run_attempt,before["package_sha256"],
                      before["result_sha256"],before["claim_version"],digest,
-                     "provider_read_only_unreviewed",recorded_at))
+                     "provider_read_only_unreviewed",recorded_at,workflow_blob_sha))
                 self.store._event(db,task_id,"evidence.provider_observed",
                                   "read_only; no release/approval")
         return {"task_id": task_id, "attempt_id": attempt_id,
                 "repository_id": provider.repository_id, "pr_number": pr_number,
                 "head_sha": provider.head_sha, "run_id": run_id,
-                "workflow_id": provider.workflow_id, "digest": digest,
+                "workflow_id": provider.workflow_id,
+                "workflow_blob_sha": workflow_blob_sha, "digest": digest,
                 "observed_at": recorded_at, "new": created,
                 "assurance": "provider_read_only_unreviewed",
                 "production_finalization_permitted": False,
@@ -153,8 +176,8 @@ class ProviderEvidenceLedger:
         with self.store._connect() as db:
             item = db.execute("""SELECT task_id,attempt_id,repository_id,pr_number,
                 head_sha,run_id,workflow_id,run_attempt,package_sha256,
-                result_sha256,claim_version,digest,assurance,observed_at
-                FROM orchestrator_provider_observations WHERE task_id=?""",
+                result_sha256,claim_version,digest,assurance,observed_at,
+                workflow_blob_sha FROM orchestrator_provider_observations WHERE task_id=?""",
                 (task_id,)).fetchone()
             if item is None:
                 return None

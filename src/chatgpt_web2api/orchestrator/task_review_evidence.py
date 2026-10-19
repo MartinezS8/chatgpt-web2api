@@ -75,17 +75,31 @@ class TaskReviewEvidenceLedger:
                 type(ci["pr_number"]) is not int or ci["pr_number"] < 1 or
                 not isinstance(ci["head_sha"], str) or len(ci["head_sha"]) != 40):
             raise ValueError("CI receipt does not match current implementation")
-        expected_ci_digest = _hash({**binding, "repository_id": ci["repository_id"],
+        # Review inherits source provenance via the CI digest. Reopening
+        # with a newly required pin must not grandfather unpinned records.
+        workflow_blob_sha = ci["workflow_blob_sha"]
+        pin = self.ci.gate.workflow_source_pin
+        if pin is not None and workflow_blob_sha != pin.trusted_blob_sha:
+            raise ValueError("CI observation missing trusted workflow source pin")
+        if pin is None and workflow_blob_sha is not None:
+            raise ValueError("CI observation pin lacks current controller authority")
+        ci_data = {**binding, "repository_id": ci["repository_id"],
             "pr_number": ci["pr_number"], "head_sha": ci["head_sha"],
             "run_id": ci["run_id"], "workflow_id": ci["workflow_id"],
-            "run_attempt": ci["run_attempt"], "assurance": ci["assurance"]})
+            "run_attempt": ci["run_attempt"], "assurance": ci["assurance"]}
+        if workflow_blob_sha is not None:
+            ci_data["workflow_blob_sha"] = workflow_blob_sha
+        expected_ci_digest = _hash(ci_data)
         if ci["digest"] != expected_ci_digest:
             raise ValueError("CI observation digest invalid")
         if not self._fresh(ci["observed_at"], current_time):
             raise ValueError("CI observation stale or invalid")
-        return {**binding, "repository_id": ci["repository_id"],
-                "pr_number": ci["pr_number"], "head_sha": ci["head_sha"],
-                "ci_digest": ci["digest"], "ci_observed_at": ci["observed_at"]}
+        snapshot = {**binding, "repository_id": ci["repository_id"],
+                    "pr_number": ci["pr_number"], "head_sha": ci["head_sha"],
+                    "ci_digest": ci["digest"], "ci_observed_at": ci["observed_at"]}
+        if workflow_blob_sha is not None:
+            snapshot["workflow_blob_sha"] = workflow_blob_sha
+        return snapshot
 
     def _fresh(self, observed: float, current: float) -> bool:
         try:
