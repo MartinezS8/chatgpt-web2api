@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .outbox import DispatchOutbox
 from .resource_registry import ResourceIdentity, ResourceRegistry
+from .review_commands import READ_COMMANDS, configure_review_commands, execute_review_command
 from .store import Store, TaskSpec
 from .task_packages import TaskPackages
 from .worker_commands import (
@@ -85,6 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = commands.add_parser("recover", help="Requeue only expired pre-send leases; quarantine uncertain sends")
     s.add_argument("--project", required=True)
     configure_worker_commands(commands)
+    configure_review_commands(commands)
     return p
 
 
@@ -129,6 +131,8 @@ def execute(args: argparse.Namespace) -> dict:
     if not args.db:
         raise ValueError("--db or CHATGPT_ORCHESTRATOR_DB must be set")
     db_path = Path(args.db).expanduser().resolve()
+    if args.command in READ_COMMANDS and not db_path.is_file():
+        raise FileNotFoundError(f"database does not exist: {db_path}")
     if args.command in WORKER_READ_COMMANDS and not db_path.is_file():
         raise FileNotFoundError(f"database does not exist: {db_path}")
     if args.command in WORKER_COMMANDS - WORKER_READ_COMMANDS:
@@ -139,6 +143,8 @@ def execute(args: argparse.Namespace) -> dict:
     if args.command in {"create-task", "claim", "recover", "register-resource", "seal-task", "ack-delivery-event", "reconcile-dispatch"}:
         db_path.parent.mkdir(parents=True, exist_ok=True)
     store = Store(db_path)
+    if args.command in READ_COMMANDS:
+        return execute_review_command(args, store)
     if args.command in WORKER_COMMANDS:
         return execute_worker_command(args, store)
     if args.command in {"seal-task", "task-package", "delivery-events", "ack-delivery-event", "reconcile-dispatch"}:
