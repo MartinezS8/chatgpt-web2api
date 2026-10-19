@@ -1,10 +1,19 @@
 import tempfile
+import multiprocessing
+import concurrent.futures
 import time
 import unittest
 from pathlib import Path
 from chatgpt_web2api.orchestrator.store import Store,TaskSpec,TaskState
 from chatgpt_web2api.orchestrator.task_packages import TaskPackages
 from chatgpt_web2api.orchestrator.outbox import DispatchOutbox
+
+def _begin_worker(parameters: tuple[str, str, str, str]) -> bool:
+    database, blob_root, task_id, token = parameters
+    store = Store(database)
+    packages = TaskPackages(store, blob_root)
+    return DispatchOutbox(store, packages).begin(task_id, token)["new_send_permit"]
+
 
 class PackageAndOutboxTest(unittest.TestCase):
     def setUp(self):
@@ -108,6 +117,24 @@ class PackageAndOutboxTest(unittest.TestCase):
         next_outbox=DispatchOutbox(self.store,self.pack)
         self.assertEqual(next_outbox.consumer_events('codex')[0]['id'],evs[1]['id'])
         self.assertFalse(next_outbox.acknowledge_event('codex',evs[0]['id']))
+
+    def test_concurrent_begin_yields_exactly_one_send_permit(self):
+        self.pack.seal("t1", "hello")
+        claim = self.claim()
+        args = (str(self.root / "db.sqlite"), str(self.root / "blobs"), "t1", claim["claim_token"])
+        ctx = multiprocessing.get_context("spawn")
+        with concurrent.futures.ProcessPoolExecutor(max_workers=3, mp_context=ctx) as pool:
+            permits = list(pool.map(_begin_worker, [args] * 9))
+        self.assertEqual(permits.count(True), 1)
+        self.assertEqual(permits.count(False), 8)
+        self.assertEqual(len(self.outbox.events()), 1)
+
+    def test_wrong_claim_cannot_inspect_existing_attempt(self):
+        self.pack.seal("t1", "hello")
+        claim = self.claim()
+        self.outbox.begin("t1", claim["claim_token"])
+        with self.assertRaises(ValueError):
+            self.outbox.begin("t1", "wrong-claim")
 
     def test_no_ack_without_fenced_claim(self):
         self.pack.seal('t1','hello')
