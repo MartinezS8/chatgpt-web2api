@@ -62,6 +62,29 @@ def test_exact_two_file_mock_receipt_and_seal(inputs):
     assert not run(gate)["created"]
     assert gate.get("t1")["assurance"]=="offline_mock_only"
 
+
+def test_repeat_sealed_mock_preflight_never_reuploads(inputs):
+    _, gate = inputs
+    initial = Uploader()
+    assert run(gate, uploader=initial)["created"]
+    assert len(initial.seen) == 2
+    repeated = Uploader()
+    result = run(gate, uploader=repeated)
+    assert result["created"] is False
+    assert result["attachment_count"] == 2
+    assert repeated.seen == []
+
+
+def test_changed_preflight_capabilities_rejected_before_reupload(inputs):
+    _, gate = inputs
+    assert run(gate, uploader=Uploader())["created"]
+    changed = Uploader()
+    with pytest.raises(ValueError, match="sealed preflight"):
+        run(gate, caps=Caps(available_apps=["GitHub", "ExtraMockApp"]),
+            uploader=changed)
+    assert changed.seen == []
+
+
 @pytest.mark.parametrize("caps,match",[
     (Caps(model="GPT-5.6"),"model/effort"),
     (Caps(effort="Medium"),"model/effort"),
