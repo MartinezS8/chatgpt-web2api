@@ -209,6 +209,44 @@ class UploadIntents:
             self.store._event(db,task_id,"upload.unknown",reason)
             return True
 
+    def perform_mock(self, *, task_id: str, worker_id: str,
+                     claim_token: str, uploader) -> list[dict]:
+        """Run mock uploads once, with a durable per-file intent before each call.
+
+        Existing attempts (including ready ones lacking a matching *sealed*
+        preflight record) are never re-sent by this helper. The caller must
+        perform an independent, immutable preflight lookup before invoking it.
+        """
+        record = self.reserve(task_id=task_id, worker_id=worker_id,
+                              claim_token=claim_token)
+        if not record["created"]:
+            raise ValueError("upload intent already exists: reconciliation required; no re-upload")
+        try:
+            while True:
+                part = self.reserve_next(task_id=task_id, upload_id=record["upload_id"],
+                                         worker_id=worker_id, claim_token=claim_token)
+                if part is None:
+                    break
+                blob = self.packages.blob_root / part["sha256"]
+                receipt = uploader.upload(dict(part), str(blob))
+                self.acknowledge(task_id=task_id, upload_id=record["upload_id"],
+                                 worker_id=worker_id, claim_token=claim_token,
+                                 attachment_sha256=part["sha256"], receipt=receipt)
+            if self.get(task_id)["status"] != "ready_mock":
+                raise ValueError("mock uploads have not been fully acknowledged")
+            return [{"name": p["name"], "sha256": p["sha256"],
+                     "remote_id": p["remote_id"], "size": p["size"]}
+                    for p in self.receipts(task_id)]
+        except Exception:
+            # A provider may have accepted an attachment even if the adapter
+            # raised (including network timeout after remote commit). Do NOT
+            # try a second upload; preserve the unknown receipt for recovery.
+            try:
+                self.quarantine(task_id=task_id, upload_id=record["upload_id"])
+            except ValueError:
+                pass
+            raise
+
     def get(self, task_id: str) -> dict | None:
         with self.store._connect() as db:
             row = db.execute("SELECT * FROM orchestrator_upload_intents WHERE task_id=?",
