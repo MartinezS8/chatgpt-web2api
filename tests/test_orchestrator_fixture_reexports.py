@@ -30,4 +30,9 @@ def test_task_state_still_serializes_as_value():
 
     assert TaskState.RESERVED.value == "reserved"
     assert TaskState.RESERVED == "reserved"
-    assert str(TaskState.RESERVED) == "reserved"
+    assert str(TaskState.RESERVED) == "TaskState.RESERVED"
+
+    # Standard-library JSON still serializes the string value, not Enum.__str__.
+    import json
+
+    assert json.dumps({"state": TaskState.RESERVED}) == '{"state": "reserved"}'

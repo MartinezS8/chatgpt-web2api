@@ -9,11 +9,16 @@ import sqlite3
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum, StrEnum
 from pathlib import Path
 
 
 class TaskState(StrEnum):
+    # Preserve the published str(TaskState.RESERVED) representation that
+    # existed when this was a (str, Enum). StrEnum normally returns "reserved".
+    # Serialization and string equality continue to use the string value.
+    __str__ = Enum.__str__
+
     QUEUED = "queued"
     RESERVED = "reserved"
     DISPATCHING = "dispatching"
