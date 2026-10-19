@@ -88,7 +88,7 @@ class OrchestratorTests(unittest.TestCase):
     def test_verified_evidence_completes(self):
         self.task("a")
         transport = StubTransport()
-        control = Controller(self.db, transport, TestOnlyVerifier())
+        control = Controller(self.db, transport, TestOnlyVerifier(), offline_test_mode=True)
         self.assertEqual(control.dispatch("sample", {"a": "prompt-a"}), "a")
         self.assertEqual(control.poll("sample"), ["a"])
         self.assertEqual(self.db.get("a")["state"], "verified")
@@ -99,9 +99,21 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(self.db.get("a")["state"], "verified")
         self.assertIsNotNone(self.db.get("a")["slot"])
 
+    def test_legacy_controller_cannot_dispatch_or_poll_by_default(self):
+        self.task("a")
+        transport = StubTransport()
+        controller = Controller(self.db, transport)
+        with self.assertRaisesRegex(PermissionError, "Legacy Controller transport is disabled"):
+            controller.dispatch("sample", {"a": "prompt-a"})
+        with self.assertRaises(PermissionError):
+            controller.poll("sample")
+        self.assertEqual(transport.calls, [])
+        self.assertEqual(self.db.get("a")["state"], "queued")
+        self.assertEqual(self.db.events("a")[-1]["kind"], "created")
+
     def test_no_self_reported_success_by_default(self):
         self.task("a")
-        control = Controller(self.db, StubTransport())
+        control = Controller(self.db, StubTransport(), offline_test_mode=True)
         control.dispatch("sample", {"a": "prompt-a"})
         self.assertEqual(control.poll("sample"), [])
         self.assertEqual(self.db.get("a")["state"], "needs_human")
@@ -109,7 +121,7 @@ class OrchestratorTests(unittest.TestCase):
     def test_correlation_mismatch_does_not_accept(self):
         self.task("a")
         transport = StubTransport()
-        control = Controller(self.db, transport, TestOnlyVerifier())
+        control = Controller(self.db, transport, TestOnlyVerifier(), offline_test_mode=True)
         control.dispatch("sample", {"a": "prompt-a"})
         transport.mismatch = True
         control.poll("sample")
@@ -119,7 +131,7 @@ class OrchestratorTests(unittest.TestCase):
         self.task("a")
         transport = StubTransport()
         transport.fail_send = True
-        control = Controller(self.db, transport)
+        control = Controller(self.db, transport, offline_test_mode=True)
         control.dispatch("sample", {"a": "prompt-a"})
         self.assertEqual(self.db.get("a")["state"], "unknown_delivery")
         self.assertEqual(transport.calls, ["a"])
@@ -145,7 +157,7 @@ class OrchestratorTests(unittest.TestCase):
     def test_prompt_checksum_error_blocks_send(self):
         self.task("a")
         transport = StubTransport()
-        control = Controller(self.db, transport)
+        control = Controller(self.db, transport, offline_test_mode=True)
         control.dispatch("sample", {"a": "different"})
         self.assertEqual(self.db.get("a")["state"], "needs_human")
         self.assertEqual(transport.calls, [])
@@ -198,7 +210,7 @@ class OrchestratorTests(unittest.TestCase):
         db = RecoverBeforeTransitionStore(self.db.path)
         self.task("a")
         transport = StubTransport()
-        result = Controller(db, transport).dispatch("sample", {"a": "prompt-a"})
+        result = Controller(db, transport, offline_test_mode=True).dispatch("sample", {"a": "prompt-a"})
         self.assertEqual(result, "a")
         self.assertEqual(transport.calls, [])
         self.assertEqual(db.get("a")["state"], "queued")
@@ -240,7 +252,7 @@ class OrchestratorTests(unittest.TestCase):
     def test_verified_must_not_release_resource_until_approval(self):
         self.task("a", write_scopes=("repo:src/api",))
         self.task("b", write_scopes=("repo:src/api",))
-        control = Controller(self.db, StubTransport(), TestOnlyVerifier())
+        control = Controller(self.db, StubTransport(), TestOnlyVerifier(), offline_test_mode=True)
         control.dispatch("sample", {"a": "prompt-a"})
         self.assertEqual(control.poll("sample"), ["a"])
         self.assertIsNone(self.db.claim("sample"))
