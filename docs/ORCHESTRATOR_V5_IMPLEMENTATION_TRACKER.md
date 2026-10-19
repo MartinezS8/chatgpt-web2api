@@ -9,6 +9,7 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 3. [PR #3](https://github.com/MartinezS8/chatgpt-web2api/pull/3): PR-02B resource authority → PR #2 (Draft).
 4. [PR #4](https://github.com/MartinezS8/chatgpt-web2api/pull/4): PR-02C immutable packages and dispatch outbox → PR #3 (Draft).
 5. [PR #5](https://github.com/MartinezS8/chatgpt-web2api/pull/5): PR-03 mock-only worker registry / bounded scheduler / supervisor → PR #4 (Draft).
+6. PR-04: offline-only persisted callbacks, SHA-bound simulated evidence, independent mock-review ledger, bounded fix proposals → PR #5 (Draft).
 
 **Why no GitHub Issues?** GitHub returned HTTP 410, `Issues has been disabled in this repository`, while attempting to file this roadmap. This document is the canonical repository-side backlog until the repository owner decides to enable Issues. Do not silently turn Issues on.
 
@@ -49,17 +50,21 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 
 **Acceptance so far:** no mock-worker claim collision; no unattended re-send; reproducible local worker registry on restart. **Do not describe this as live 5-agent ChatGPT support.**
 
-## PR-04 (P1) — Callback, verification, independent review, planning
+## PR-04 (P1) — Offline callback, evidence, review and planning framework
 
-Planned modules: `events.py`, `delivery.py`, `evidence.py`, `review_policy.py`, `planner.py`.
+**Implemented as a Draft PR stacked on PR #5:** [technical notes](ORCHESTRATOR_PR04_REVIEW_CALLBACKS.md).
 
-- [ ] Durable `attempt_id` and external turn/message identity correlation from an **authorized** transport.
-- [ ] Progress notifications are advisory; lost progress is not confused with completion.
-- [ ] Immutable, provider-verified GitHub commit/PR/CI evidence and branch-SHA invalidation.
-- [ ] Independent read-only reviewer (cannot self-approve); human approval for consequential database / merge actions.
-- [ ] Bounded fix–review loop with explicit budgets and failure exits.
+- [x] SQLite-backed advisory callback inbox using exact attempt/worker/conversation/delivery/sequence correlation for **mock** workers. Replayed or conflicting progress rejected; only correlated outbox completion can be terminal.
+- [x] SHA-bound simulated GitHub PR/CI evidence gate, immutable per task; any stale/wrong CI/run/head rejected. **Assurance: offline_mock_only; no live API call.**
+- [x] Read-only review-task relationship checks, separate enabled mock review worker, fixed evidence/head and sealed review decision. **No production approvals.**
+- [x] Idempotent and bounded fix *proposals* after 'changes_requested'; no automatic task claim/retry/writes.
+- [x] 13 targeted local offline regression tests with V4 Store fixture.
+- [ ] Trusted live callback provenance and authenticated external turn correlation; provider-retrieved GitHub commit/PR/CI evidence.
+- [ ] Centralized production approval gate: legacy `Store.finalize_verified` still accepts operator assertion strings. Prevent alternate authorization paths before exposing externally.
+- [ ] Automatic DAG task creation with reviewed scope handoff, policy checks, escalation and budgets.
+- [ ] Full stacked/upstream tests, CI/Windows and independent release review (deferred).
 
-**Acceptance:** duplicate/out-of-order/mismatched callbacks never result in a second completion or unsafe merge.
+**Acceptance so far:** mock-only duplicate/mismatched signals are rejected; simulated review/fix loop cannot authorize external effects. Real web callbacks/independent GitHub proof remain open.
 
 ## PR-05 (P1) — Low-token Codex CLI/MCP
 
