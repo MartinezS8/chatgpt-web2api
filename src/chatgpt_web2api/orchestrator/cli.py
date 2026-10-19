@@ -13,8 +13,10 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from .outbox import DispatchOutbox
 from .resource_registry import ResourceIdentity, ResourceRegistry
 from .store import Store, TaskSpec
+from .task_packages import TaskPackages
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -56,6 +58,21 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--alias", required=True)
     s.add_argument("--path", default=None)
     commands.add_parser("list-resources", help="List local operator-asserted resource aliases")
+    s = commands.add_parser("seal-task", help="Persist immutable task prompt and local file snapshots; does not upload")
+    s.add_argument("--id", required=True)
+    s.add_argument("--prompt-file", required=True)
+    s.add_argument("--attachment", action="append", default=[])
+    s.add_argument("--allowed-root", default=None, help="Required if attachments are present")
+    s = commands.add_parser("task-package", help="Read sealed package manifest without exposing the prompt")
+    s.add_argument("--id", required=True)
+    s = commands.add_parser("delivery-events", help="Read durable delivery events by ID cursor")
+    s.add_argument("--after", type=int, default=0)
+    s.add_argument("--limit", type=int, default=100)
+    s = commands.add_parser("ack-delivery-event", help="Advance an individual consumer's durable event cursor")
+    s.add_argument("--consumer", required=True)
+    s.add_argument("--event-id", type=int, required=True)
+    s = commands.add_parser("reconcile-dispatch", help="Quarantine aged unconfirmed send intents; never resends")
+    s.add_argument("--stale-seconds", type=int, default=300)
     s = commands.add_parser("claim", help="Atomically reserve one eligible task without sending it")
     s.add_argument("--project", required=True)
     s.add_argument("--max-slots", type=int, default=5)
@@ -69,7 +86,8 @@ def _capabilities() -> dict:
         "task_store": "sqlite-wal", "max_worker_slots": 5,
         "commands": ["capabilities", "status", "list-tasks", "task", "events",
                      "create-task", "register-resource", "resolve-resource", "list-resources",
-                     "claim", "recover"],
+                     "seal-task", "task-package", "delivery-events", "ack-delivery-event",
+                     "reconcile-dispatch", "claim", "recover"],
         "automatic_web_dispatch": False,
         "chatgpt_ui_automation": False,
         "supabase_or_github_writes": False,
@@ -78,6 +96,11 @@ def _capabilities() -> dict:
         "dispatch_fencing": "claim-token-cas-and-expiring-presend-lease",
         "write_scope_locking": "sqlite-global-conservative",
         "resource_alias_assurance": "operator-asserted-not-provider-verified",
+        "immutable_task_packages": True,
+        "local_attachment_snapshots": True,
+        "remote_file_upload": False,
+        "durable_dispatch_outbox": "available-to-internal-code-not-external-transport",
+        "durable_event_cursor": True,
         "review_gate": "verified-state-requires-explicit-finalization",
     }
 
@@ -96,11 +119,29 @@ def execute(args: argparse.Namespace) -> dict:
         raise ValueError("--db or CHATGPT_ORCHESTRATOR_DB must be set")
     db_path = Path(args.db).expanduser().resolve()
     # Reads must not accidentally create a blank DB and conceal configuration errors.
-    if args.command in {"status", "list-tasks", "task", "events", "resolve-resource", "list-resources"} and not db_path.is_file():
+    if args.command in {"status", "list-tasks", "task", "events", "resolve-resource", "list-resources", "task-package", "delivery-events"} and not db_path.is_file():
         raise FileNotFoundError(f"database does not exist: {db_path}")
-    if args.command in {"create-task", "claim", "recover", "register-resource"}:
+    if args.command in {"create-task", "claim", "recover", "register-resource", "seal-task", "ack-delivery-event", "reconcile-dispatch"}:
         db_path.parent.mkdir(parents=True, exist_ok=True)
     store = Store(db_path)
+    if args.command in {"seal-task", "task-package", "delivery-events", "ack-delivery-event", "reconcile-dispatch"}:
+        packages = TaskPackages(store, db_path.parent / "orchestrator_blobs")
+        outbox = DispatchOutbox(store, packages)
+        if args.command == "seal-task":
+            file = Path(args.prompt_file).expanduser().resolve(strict=True)
+            if not file.is_file() or file.stat().st_size > 1024 * 1024:
+                raise ValueError("invalid prompt file")
+            return packages.seal(args.id, file.read_text(encoding="utf-8"),
+                                 args.attachment, allowed_root=args.allowed_root)
+        if args.command == "task-package":
+            package = packages.read(args.id)
+            return {k: v for k, v in package.items() if k != "prompt"}
+        if args.command == "delivery-events":
+            return {"events": outbox.events(args.after, args.limit)}
+        if args.command == "ack-delivery-event":
+            return {"acked": outbox.acknowledge_event(args.consumer, args.event_id)}
+        return {"quarantined": outbox.reconcile_stale(args.stale_seconds),
+                "automatic_resend": False}
     if args.command in {"register-resource", "resolve-resource", "list-resources"}:
         registry = ResourceRegistry(store)
         if args.command == "register-resource":
