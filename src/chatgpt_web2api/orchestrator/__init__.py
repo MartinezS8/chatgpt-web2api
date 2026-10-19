@@ -3,7 +3,14 @@
 No ChatGPT automation, account login, connector execution or web requests are
 performed by this package. It is an additive overlay for an upstream fork.
 """
-from .store import Store, TaskSpec, TaskState
 from .controller import Controller, Transport, TransportResult, Verifier
+from .outbox import DispatchOutbox
+from .resource_registry import ResourceIdentity, ResourceRegistry
+from .store import Store, TaskSpec, TaskState
+from .task_packages import TaskPackages
 
-__all__ = ["Store", "TaskSpec", "TaskState", "Controller", "Transport", "TransportResult", "Verifier"]
+__all__ = [
+    "Controller", "DispatchOutbox", "ResourceIdentity", "ResourceRegistry",
+    "Store", "TaskPackages", "TaskSpec", "TaskState", "Transport",
+    "TransportResult", "Verifier",
+]
