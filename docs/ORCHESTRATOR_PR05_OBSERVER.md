@@ -17,3 +17,13 @@ python -m chatgpt_web2api.orchestrator --json observe-status --project project1
 python -m chatgpt_web2api.orchestrator --json observe-events --after 0 --limit 20
 python -m chatgpt_web2api.orchestrator --json observe-workers --account personal
 chatgpt-orchestrator-observer-mcp --db "$env:CHATGPT_ORCHESTRATOR_DB"
+```
+
+The official Codex client must be configured to invoke the separate MCP executable **locally**. Do not serve it on a non-loopback interface. Read-only queries do not authenticate OS users; restrict SQLite DB visibility using Windows ACLs.
+
+## Validation
+
+`PYTHONPATH=src pytest -q tests/test_orchestrator_observer.py` → 6 offline tests passed using V4 Store fixtures. `python -m compileall -q src` passes.
+
+**Untested:** full stacked tree, Windows CI, a real MCP 1.26 client/server round-trip, original upstream suite, Ruff, packaging/install executable. Fail the release gate until verified. The next PR-05B may add a bounded mock-only orchestration control interface after the centralized approval policy and authenticated callback gates are complete.
+
