@@ -121,7 +121,61 @@ def test_reservation_changed_rejects_receipts(inputs):
         def upload(self,att,path):
             with store._connect() as d:d.execute("UPDATE tasks SET state='needs_human' WHERE task_id='t1'")
             return super().upload(att,path)
-    with pytest.raises(ValueError,match="reservation changed"):
+    with pytest.raises(ValueError,match="stale reservation"):
         run(gate,uploader=Disruption())
     assert gate.get("t1") is None
 
+
+
+def test_parallel_preflight_only_one_mock_upload_sequence(inputs):
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    _, gate = inputs
+    class SlowUploader(Uploader):
+        def upload(self, att, path):
+            time.sleep(0.015)
+            return super().upload(att, path)
+
+    uploader = SlowUploader()
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: _try_mock_preflight(gate, uploader), range(16)))
+    assert sum(isinstance(x, dict) and x["created"] for x in results) == 1
+    assert len(uploader.seen) == 2  # exactly one 2-file sequence
+    assert all(isinstance(x, dict) or "reconciliation" in x for x in results)
+    assert gate.get("t1")["assurance"] == "offline_mock_only"
+
+
+def _try_mock_preflight(gate, uploader):
+    try:
+        return run(gate, uploader=uploader)
+    except ValueError as exc:
+        return str(exc)
+
+
+def test_uncertain_mock_upload_never_retries(inputs):
+    _, gate = inputs
+    class TimeoutUploader(Uploader):
+        def upload(self, att, path):
+            self.seen.append(path)
+            raise TimeoutError("remote may have accepted file")
+
+    uploader = TimeoutUploader()
+    with pytest.raises(TimeoutError):
+        run(gate, uploader=uploader)
+    assert len(uploader.seen) == 1
+    assert gate.intents.get("t1")["status"] == "unknown"
+    retry = Uploader()
+    with pytest.raises(ValueError, match="reconciliation"):
+        run(gate, uploader=retry)
+    assert retry.seen == []
+    assert gate.get("t1") is None
+
+
+def test_stale_claim_cannot_replay_previous_mock_receipts(inputs):
+    store, gate = inputs
+    assert run(gate)["created"]
+    with store._connect() as db:
+        db.execute("UPDATE tasks SET claim_token='rotated' WHERE task_id='t1'")
+    with pytest.raises(ValueError, match="stale reservation"):
+        run(gate, uploader=Uploader())
