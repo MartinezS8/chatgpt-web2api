@@ -49,7 +49,10 @@ def test_all_os_python_combinations_run_full_exact_head_gate():
     assert "python: ['3.11', '3.12']" in content
     assert "fail-fast: false" in content
     assert "REVIEWED_HEAD_SHA: ${{ github.sha }}" in content
-    assert "verify_orchestrator.py --full --strict --expected-sha" in content
+    # Explicit diagnostics can be placed between the strict flag and SHA;
+    # only exact-SHA, full-suite and strict requirements are authoritative.
+    assert "verify_orchestrator.py --full --strict " in content
+    assert '--expected-sha "$REVIEWED_HEAD_SHA"' in content
     assert "W2A_E2E_RUN: '0'" in content
     assert "needs: offline-suite" in content
 

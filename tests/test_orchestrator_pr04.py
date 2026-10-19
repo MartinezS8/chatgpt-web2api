@@ -157,13 +157,18 @@ def test_planner_cannot_propose_without_rejected_review(db,evid):
         Planner(db).propose_mock_fix(target_task_id="build",reviewer_task_id="review-1",head_sha=SHA,proposed_prompt="fix")
 
 
-def test_disabled_reviewer_fails_closed(db,evid):
-    evid.inspect_mock(task_id="build",repository_id="123",pr_number=4,expected_head_sha=SHA,run_id=1,probe=FakeProbe())
-    ledger=ReviewLedger(db)
+@pytest.mark.parametrize("disabled_worker", ("qa", "dev"))
+def test_disabled_reviewer_or_implementer_fails_closed(db, evid, disabled_worker):
+    evid.inspect_mock(task_id="build",repository_id="123",pr_number=4,
+                      expected_head_sha=SHA,run_id=1,probe=FakeProbe())
+    ledger = ReviewLedger(db)
     with db._connect() as d:
-        d.execute("UPDATE orchestrator_workers SET enabled=0 WHERE worker_id='qa'")
+        d.execute("UPDATE orchestrator_workers SET enabled=0 WHERE worker_id=?",
+                  (disabled_worker,))
     with pytest.raises(ValueError, match="enabled mock review worker"):
-        ledger.record_mock(target_task_id="build",reviewer_task_id="review-1",head_sha=SHA,decision="approved")
+        ledger.record_mock(target_task_id="build",reviewer_task_id="review-1",
+                           head_sha=SHA,decision="approved")
+    assert ledger.get("build", "review-1") is None
 
 def test_reviewer_must_share_project_account_but_not_session(db,evid):
     evid.inspect_mock(task_id="build",repository_id="123",pr_number=4,

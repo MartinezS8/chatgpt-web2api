@@ -177,5 +177,10 @@ def test_stale_claim_cannot_replay_previous_mock_receipts(inputs):
     assert run(gate)["created"]
     with store._connect() as db:
         db.execute("UPDATE tasks SET claim_token='rotated' WHERE task_id='t1'")
-    with pytest.raises(ValueError, match="stale reservation"):
-        run(gate, uploader=Uploader())
+    repeated = Uploader()
+    # The durable upload-intent authority rejects the rotated fencing token
+    # before another mock upload, even if an earlier receipt was sealed.
+    with pytest.raises(ValueError, match="not ready for this fenced claim"):
+        run(gate, uploader=repeated)
+    assert repeated.seen == []
+    assert gate.get("t1") is not None
