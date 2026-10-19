@@ -26,7 +26,8 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 20. [PR #23](https://github.com/MartinezS8/chatgpt-web2api/pull/23): bind read-only GitHub reviewer observations to task/dispatch/CI snapshot/package/claim, preserving all locks → PR #22 (Draft).
 21. [PR #24](https://github.com/MartinezS8/chatgpt-web2api/pull/24): signed GitHub PR-HEAD commit metadata plus active mock-worker/claim attribution, read-only and not an authenticated remote session → PR #23 (Draft).
 22. [PR #25](https://github.com/MartinezS8/chatgpt-web2api/pull/25): operator-pinned workflow file provenance, with exact commit blob SHA, no merge permission → PR #24 (Draft).
-23. **PR #26 (this branch)**: persist pinned CI workflow blob in fenced task evidence and transitive review digests; preserve legacy read-only receipts → PR #25 (Draft).
+23. [PR #26](https://github.com/MartinezS8/chatgpt-web2api/pull/26): persist pinned CI workflow blob in fenced task evidence and transitive review digests; preserve legacy read-only receipts → PR #25 (Draft).
+24. **PR #27 (this branch)**: verify local tests against exact clean Git HEAD, fail closed on mismatch, distinguish smoke from complete local verification → PR #26 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -288,6 +289,18 @@ Details: [PR-23 workflow provenance design](ORCHESTRATOR_PR23_WORKFLOW_SOURCE_PI
 - [ ] P1: verified live transport and ChatGPT-web model/app/file semantics remain unimplemented; this is audit-only.
 
 See [PR-24 pinned CI evidence ledger](ORCHESTRATOR_PR24_TASK_CI_WORKFLOW_PIN_LEDGER.md). A signed commit, CI success or a mock worker cannot grant live send, merge, task completion or lock-release authority.
+
+## PR-25 (P0) — Reproducible local verification of exact Git HEAD (Draft PR #27)
+
+- [x] Expand `scripts/verify_orchestrator.py` with expected 40-hex SHA, Git-root check, clean tracked/untracked working tree and strict fail-closed preflight before test subprocesses.
+- [x] `--full --strict` requires compileall, full non-E2E pytest and Ruff. Development `--skip-lint` is explicitly incomplete, not a successful full gate.
+- [x] Force E2E opt-in off in child test process; emit no raw test stdout/stderr unless `--diagnostics` explicitly requested. Report `network_isolation_verified=false` rather than claiming network impossibility.
+- [x] Seven isolated local verification tests passed Python 3.13/Linux using temporary Git repositories and mock test processes. Tested source/test Git blob SHAs matched GitHub.
+- [ ] P0: run exact stacked HEAD full suite with `--expected-sha`, `--full`, `--strict`; independent Windows/macOS/Linux Python 3.11/3.12 matrix + GitHub checks still unproven (0 workflow runs on fork at review).
+- [ ] P0: trusted protected CI policy, independent reviewers and live authenticated worker identity before any task finalizer.
+- [ ] P1: only authorized supportable transport; no ChatGPT Plus automated web sends, model/plugin selection or file uploads enabled.
+
+See [PR-25 reproducible verification](ORCHESTRATOR_PR25_REPRODUCIBLE_VERIFICATION.md). `local_gate_complete` is a **local smoke/integration assertion**, never a signed CI or user authorization.
 
 ## PR-08 (P2) — Windows lifecycle and release
 
