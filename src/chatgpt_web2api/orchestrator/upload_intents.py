@@ -247,6 +247,26 @@ class UploadIntents:
                 pass
             raise
 
+    def assert_ready_locked(self, db, *, task_id: str, worker_id: str,
+                            claim_token: str, package_sha256: str) -> None:
+        """Assert mock receipts are current while caller holds a DB transaction."""
+        token_hash = self._token_hash(claim_token)
+        self._require_binding(db, task_id, worker_id, token_hash)
+        rec = db.execute("""SELECT * FROM orchestrator_upload_intents
+            WHERE task_id=?""", (task_id,)).fetchone()
+        if (rec is None or rec["status"] != "ready_mock" or
+                rec["worker_id"] != worker_id or
+                rec["claim_token_hash"] != token_hash or
+                rec["package_sha256"] != package_sha256):
+            raise ValueError("upload preflight is not ready for this fenced claim")
+
+    def assert_ready(self, *, task_id: str, worker_id: str,
+                     claim_token: str, package_sha256: str) -> None:
+        with self.store._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            self.assert_ready_locked(db, task_id=task_id, worker_id=worker_id,
+                                     claim_token=claim_token, package_sha256=package_sha256)
+
     def get(self, task_id: str) -> dict | None:
         with self.store._connect() as db:
             row = db.execute("SELECT * FROM orchestrator_upload_intents WHERE task_id=?",
