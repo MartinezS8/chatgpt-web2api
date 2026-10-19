@@ -9,6 +9,7 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 3. [PR #3](https://github.com/MartinezS8/chatgpt-web2api/pull/3): PR-02B resource authority → PR #2 (Draft).
 4. [PR #4](https://github.com/MartinezS8/chatgpt-web2api/pull/4): PR-02C immutable packages and dispatch outbox → PR #3 (Draft).
 5. [PR #5](https://github.com/MartinezS8/chatgpt-web2api/pull/5): PR-03 mock-only worker registry / bounded scheduler / supervisor → PR #4 (Draft).
+6. PR-04 offline callback + provider-evidence policy → PR #5 (Draft, implementation branch `codex/orchestrator-v7-callback-evidence-gates`).
 
 **Why no GitHub Issues?** GitHub returned HTTP 410, `Issues has been disabled in this repository`, while attempting to file this roadmap. This document is the canonical repository-side backlog until the repository owner decides to enable Issues. Do not silently turn Issues on.
 
@@ -51,15 +52,17 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 
 ## PR-04 (P1) — Callback, verification, independent review, planning
 
-Planned modules: `events.py`, `delivery.py`, `evidence.py`, `review_policy.py`, `planner.py`.
+**Offline implementation on `codex/orchestrator-v7-callback-evidence-gates` (Draft):** See [PR-04 documentation](ORCHESTRATOR_PR04_CALLBACKS_EVIDENCE.md).
 
-- [ ] Durable `attempt_id` and external turn/message identity correlation from an **authorized** transport.
-- [ ] Progress notifications are advisory; lost progress is not confused with completion.
-- [ ] Immutable, provider-verified GitHub commit/PR/CI evidence and branch-SHA invalidation.
-- [ ] Independent read-only reviewer (cannot self-approve); human approval for consequential database / merge actions.
-- [ ] Bounded fix–review loop with explicit budgets and failure exits.
+- [x] Mock-only callback policy with strict attempt/conversation/delivery correlation, duplicate/out-of-order progress handling and durable V5 outbox replay; **no real webhook or provider callbacks**.
+- [x] Strict offline GitHub review evidence types: exact provider repository/PR/head SHA, non-draft/open PR, required CI checks at current SHA, independent reviewer at current SHA, outstanding changes-requested rejection.
+- [x] Read-only review policy persists observed verdict while preserving `verified` state and write locks.
+- [ ] Provider-authenticated GitHub evidence adapter and callback transport; mock test adapter is not evidence of production authenticity.
+- [ ] Make legacy `Store.finalize_verified` impossible to call directly as unauthenticated string-only approval in any live controller.
+- [ ] Review-task DAG readiness gated by `review_of` state `verified`; bounded automatic fix/replan budgets, human approval on consequential actions.
+- [ ] Separate production consent and independent review of the exact head SHA with full CI.
 
-**Acceptance:** duplicate/out-of-order/mismatched callbacks never result in a second completion or unsafe merge.
+**Current acceptance:** four targeted offline test functions cover many negative cases and pass on Python 3.13; previous suite, full Octo-Lex tests and Windows CI remain unverified on this new branch. No remote work occurs.
 
 ## PR-05 (P1) — Low-token Codex CLI/MCP
 
