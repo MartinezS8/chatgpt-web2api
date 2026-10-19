@@ -14,6 +14,7 @@ from collections import Counter
 from pathlib import Path
 
 from .store import Store, TaskSpec
+from .resource_registry import ResourceRegistry, ResourceIdentity
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -41,8 +42,20 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--prompt-file", required=True, help="UTF-8 text; content is hashed, not saved to the DB")
     s.add_argument("--depends-on", action="append", default=[], metavar="TASK_ID")
     s.add_argument("--write-scope", action="append", default=[], metavar="SCOPE")
+    s.add_argument("--resource-alias", action="append", default=[], metavar="ALIAS",
+                   help="Use registered canonical provider resource aliases; cannot combine with --write-scope")
     s.add_argument("--baseline-sha", default="")
     s.add_argument("--review-of", default=None)
+    s = commands.add_parser("register-resource", help="Operator-asserted alias; does NOT grant live writes")
+    s.add_argument("--alias", required=True)
+    s.add_argument("--provider", required=True, choices=("github", "supabase", "vercel"))
+    s.add_argument("--provider-id", required=True, help="GitHub numeric repository ID, Supabase ref or Vercel project ID")
+    s.add_argument("--environment", help="Required for Supabase and Vercel")
+    s.add_argument("--operator", required=True)
+    s = commands.add_parser("resolve-resource", help="Resolve a registered alias to its canonical lock")
+    s.add_argument("--alias", required=True)
+    s.add_argument("--path", default=None)
+    commands.add_parser("list-resources", help="List local operator-asserted resource aliases")
     s = commands.add_parser("claim", help="Atomically reserve one eligible task without sending it")
     s.add_argument("--project", required=True)
     s.add_argument("--max-slots", type=int, default=5)
@@ -55,7 +68,8 @@ def _capabilities() -> dict:
     return {
         "task_store": "sqlite-wal", "max_worker_slots": 5,
         "commands": ["capabilities", "status", "list-tasks", "task", "events",
-                     "create-task", "claim", "recover"],
+                     "create-task", "register-resource", "resolve-resource", "list-resources",
+                     "claim", "recover"],
         "automatic_web_dispatch": False,
         "chatgpt_ui_automation": False,
         "supabase_or_github_writes": False,
@@ -63,6 +77,7 @@ def _capabilities() -> dict:
         "unknown_delivery_retry": "human-reconciliation-only",
         "dispatch_fencing": "claim-token-cas-and-expiring-presend-lease",
         "write_scope_locking": "sqlite-global-conservative",
+        "resource_alias_assurance": "operator-asserted-not-provider-verified",
         "review_gate": "verified-state-requires-explicit-finalization",
     }
 
@@ -81,11 +96,22 @@ def execute(args: argparse.Namespace) -> dict:
         raise ValueError("--db or CHATGPT_ORCHESTRATOR_DB must be set")
     db_path = Path(args.db).expanduser().resolve()
     # Reads must not accidentally create a blank DB and conceal configuration errors.
-    if args.command in {"status", "list-tasks", "task", "events"} and not db_path.is_file():
+    if args.command in {"status", "list-tasks", "task", "events", "resolve-resource", "list-resources"} and not db_path.is_file():
         raise FileNotFoundError(f"database does not exist: {db_path}")
-    if args.command in {"create-task", "claim", "recover"}:
+    if args.command in {"create-task", "claim", "recover", "register-resource"}:
         db_path.parent.mkdir(parents=True, exist_ok=True)
     store = Store(db_path)
+    if args.command in {"register-resource", "resolve-resource", "list-resources"}:
+        registry = ResourceRegistry(store)
+        if args.command == "register-resource":
+            key = registry.register(args.alias, ResourceIdentity(args.provider, args.provider_id,
+                                   args.environment), operator=args.operator)
+            return {"alias": args.alias, "canonical_id": key,
+                    "provider_write_authorized": False, "assurance": "operator_assertion"}
+        if args.command == "resolve-resource":
+            return {"canonical_scope": registry.resolve(args.alias, args.path),
+                    "provider_write_authorized": False}
+        return {"bindings": registry.list_bindings(), "provider_write_authorized": False}
     if args.command == "status":
         rows = store.all(args.project)
         return {"project": args.project, "total": len(rows),
@@ -113,6 +139,9 @@ def execute(args: argparse.Namespace) -> dict:
                         prompt=prompt, dependencies=tuple(args.depends_on),
                         write_scopes=tuple(args.write_scope),
                         baseline_sha=args.baseline_sha, review_of=args.review_of)
+        if args.resource_alias:
+            spec = ResourceRegistry(store).task_with_resolved_scopes(
+                spec, tuple((alias, None) for alias in args.resource_alias))
         created = store.create(spec)
         return {"task_id": args.id, "created": created, "state": "queued",
                 "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
