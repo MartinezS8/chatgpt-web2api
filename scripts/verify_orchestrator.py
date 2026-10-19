@@ -15,7 +15,7 @@ import re
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
                 "validation": "local_unattested",
                 "network_isolation_verified": False,
                 "live_provider_capabilities_verified": False,
-                "start_utc": datetime.now(timezone.utc).isoformat(),
+                "start_utc": datetime.now(UTC).isoformat(),
                 "platform": platform.system(), "python": platform.python_version(),
                 "diagnostics_enabled": args.diagnostics}
     try:
