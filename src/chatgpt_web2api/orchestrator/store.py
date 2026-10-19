@@ -296,31 +296,22 @@ class Store:
 
     def finalize_verified(self, task_id: str, *, claim_token: str,
                           reviewer_ref: str, approved_by: str) -> bool:
-        """Operator-facing future gate: only reviewed, verified work may finish.
+        """DISABLED legacy entry point: assertions are not trusted approvals.
 
-        This records asserted review evidence; checking independent provenance
-        and authorization remains a separate PR-04 requirement.
+        Previously this accepted any nonempty ``reviewer_ref`` and ``approved_by``
+        as sufficient to release the task's write lock. The mock review ledger
+        cannot authenticate a GitHub review or a human approval. An authorized
+        finalization gate must verify the current provider HEAD and successful
+        CI, independent reviewer provenance, and human approval when required.
+
+        Until that gate exists, fail closed for every caller. Preserve the
+        signature for old clients, but never mutate state on this path.
         """
-        if not reviewer_ref.strip() or not approved_by.strip():
-            raise ValueError("reviewer_ref and approved_by are mandatory")
-        with self._connect() as db:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT * FROM tasks WHERE task_id=?", (task_id,)).fetchone()
-            if row is None:
-                raise ValueError(f"unknown task: {task_id}")
-            if row["state"] != TaskState.VERIFIED.value or row["claim_token"] != claim_token:
-                return False
-            if not row["evidence_ref"]:
-                raise ValueError("verified task requires immutable evidence")
-            cur = db.execute("""UPDATE tasks SET state=?,slot=NULL,claim_token=NULL,
-                    claim_version=claim_version+1, reviewer_ref=?,approved_by=?,
-                    lease_until=NULL,updated_at=? WHERE task_id=? AND state=? AND claim_token=?""",
-                (TaskState.FINISHED.value, reviewer_ref, approved_by, time.time(), task_id,
-                 TaskState.VERIFIED.value, claim_token))
-            if cur.rowcount != 1:
-                return False
-            self._event(db, task_id, "finished", f"review={reviewer_ref[:120]}")
-            return True
+        raise PermissionError(
+            "Legacy asserted review finalization is disabled; a provider-"
+            "verified, SHA-bound independent review and authorization gate "
+            "must be used before releasing a task's write lock"
+        )
 
     def recover(self, project_id: str, *, now: float | None = None):
         """Only expire stale reservations; never re-send uncertain requests."""
