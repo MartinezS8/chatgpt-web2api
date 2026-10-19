@@ -17,6 +17,7 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 11. [PR #14](https://github.com/MartinezS8/chatgpt-web2api/pull/14): independent mock reviewer identity, role, account, project and session constraints → PR #12 (Draft).
 12. [PR #15](https://github.com/MartinezS8/chatgpt-web2api/pull/15): **disable untrusted assertion-only finalization**, prove unresolved write scopes stay locked; include latest PR #5 ancestry via a no-content-change merge → PR #14 (Draft).
 13. [PR #16](https://github.com/MartinezS8/chatgpt-web2api/pull/16): **default-deny legacy Controller.dispatch/poll** unless explicitly called as an offline test, without exposing this testing flag over MCP → PR #15 (Draft).
+14. **PR #17 (this branch)**: durable per-file upload intents and persistent unknown-receipt quarantine (mock-only) → PR #16 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -152,6 +153,18 @@ See [integration review](ORCHESTRATOR_REVIEW_PR08_PR10.md). Issues and GitHub Ac
 - [x] Focused local V4 tests **34 passed + 8 subtests**; Git blob SHAs for both changed files match tested local stage.
 - [ ] Replace test-only bypass with a single authorized production command surface and non-replayable durable outbox send permit; do not offer `offline_test_mode` to agents.
 - [ ] Full stacked PR #1→#16 CI/Windows/Ruff/real provider verification still not run.
+
+## PR-15 (P0) — Durable upload intent groundwork
+
+- [x] `UploadIntents.reserve()`: one SQLite-fenced upload attempt per task, sealed package SHA binding and mock worker/claim identity.
+- [x] `reserve_next()`: one pending-to-inflight per-file intent at a time, atomically; no concurrent duplicate reservation.
+- [x] `acknowledge()`: size, MIME, digest and unique fake remote-ID validation before mock-ready state.
+- [x] `quarantine()`: unknown results never become automatic permission to retry or release a task write lock.
+- [x] 10 offline unit tests pass on Python 3.13, including 16 concurrent claim and per-file reservation attempts; full assembled suite/CI not run.
+- [ ] **P0 next:** integrate this ledger into existing `UploadPreflight.check_mock` uploader path. Until then, legacy mock preflight can perform duplicate concurrent upload calls; DO NOT attach live uploader.
+- [ ] Live adapters: provider-authenticated file IDs, upload completion/size/hash proof, worker capabilities, quotas, user approval and active message/app selection; all remain unavailable.
+
+See [PR-15 durable upload intents](ORCHESTRATOR_PR15_UPLOAD_INTENTS.md). Keeping GitHub Issues/Actions optional for Codex phase does not waive review and release tests.
 
 ## PR-08 (P2) — Windows lifecycle and release
 
