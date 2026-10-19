@@ -22,9 +22,13 @@ _SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 
 def _git(root: Path, *args: str) -> str:
+    # Never let GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE or injected Git config
+    # redirect the source identity checks away from the reviewed checkout.
+    clean_git_env = {key: value for key, value in os.environ.items()
+                     if not key.upper().startswith("GIT_")}
     result = subprocess.run(
         ["git", *args], cwd=root, capture_output=True, text=True,
-        timeout=15, check=False,
+        timeout=15, check=False, env=clean_git_env,
     )
     if result.returncode:
         raise ValueError("Git metadata unavailable; no tests were executed")
@@ -116,14 +120,21 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     env = os.environ.copy()
-    env["PYTHONPATH"] = os.pathsep.join(filter(None, [str(root / "src"),
-                                                      env.get("PYTHONPATH", "")]))
-    # Even if the operator has globally opted into live E2E, this gate cannot
-    # forward that opt-in. The pytest marker excludes e2e a second time.
+    # The verifier's meaning must not depend on inherited pytest selectors
+    # or additional test modules from a different PYTHONPATH.
+    for key in ("PYTEST_ADDOPTS", "PYTEST_PLUGINS",
+                "PYTEST_DISABLE_PLUGIN_AUTOLOAD"):
+        env.pop(key, None)
+    env["PYTHONPATH"] = str(root / "src")
+    # Even if the operator enabled live E2E, this verifier never forwards
+    # that opt-in. The marker filter independently excludes account tests.
     env["W2A_E2E_RUN"] = "0"
     commands = [
         ("compileall", [sys.executable, "-m", "compileall", "-q", "src"]),
-        ("pytest", [sys.executable, "-m", "pytest", "-q", "-m", "not e2e"] +
+        # Disable pytest's repository-local .pytest_cache side effect so an
+        # untracked cache is not mistaken for a change to reviewed source.
+        ("pytest", [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                    "-m", "not e2e"] +
          ([] if args.full else [str(t.relative_to(root)) for t in tests])),
     ]
     if not args.skip_lint:
@@ -131,14 +142,32 @@ def main(argv: list[str] | None = None) -> int:
     checks = [_invoke(n, cmd, root, env, args.timeout, args.diagnostics)
               for n, cmd in commands]
     passed = all(entry["exit_code"] == 0 for entry in checks)
-    complete = passed and args.strict and args.full and not args.skip_lint
-    print(json.dumps({**metadata, "ok": passed,
-                      "local_gate_complete": complete,
-                      "tests_started": True, "checks": checks,
-                      "skipped_checks": ["ruff"] if args.skip_lint else [],
-                      "note": "Local Git state only; independent GitHub CI/review still required"},
-                     ensure_ascii=False, sort_keys=True))
-    return 0 if passed else 1
+    # A passing test process is not proof it evaluated the originally
+    # reviewed checkout. Reject concurrent commit moves and post-test edits.
+    postflight_ok = False
+    final = {}
+    postflight_error = None
+    try:
+        observed = _preflight(root, args.expected_sha, args.strict)
+        final = {"head_sha_at_end": observed["head_sha"],
+                 "worktree_clean_at_end": observed["worktree_clean_at_start"]}
+        if observed["head_sha"] != metadata["head_sha"]:
+            raise ValueError("Git HEAD changed while tests were running")
+        postflight_ok = True
+    except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
+        postflight_error = str(exc)
+    success = passed and postflight_ok
+    complete = success and args.strict and args.full and not args.skip_lint
+    result = {**metadata, **final, "ok": success,
+              "local_gate_complete": complete,
+              "postflight_ok": postflight_ok,
+              "tests_started": True, "checks": checks,
+              "skipped_checks": ["ruff"] if args.skip_lint else [],
+              "note": "Local Git state only; independent GitHub CI/review still required"}
+    if postflight_error is not None:
+        result["postflight_error"] = postflight_error
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    return 0 if success else 1
 
 
 if __name__ == "__main__":
