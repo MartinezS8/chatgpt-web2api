@@ -12,7 +12,7 @@ The root cause: Ruff's default `F401` unused-import fix removed `store` imported
 - Introduce `tests/test_orchestrator_fixture_reexports.py`, checking that the three imported `store` objects are precisely the provider's fixture. Prevent future "safe" F401 cleanup from removing registration silently.
 - Fix all 45 reported E701 one-line colon statements and 5 E702 semicolon statements by preserving their exact expressions and making their control-body indentation explicit.
 - Resolve F841 unused locals: keep the `nextpart(item, uid)` call's side effect while removing unused assignment; remove genuinely unused `poll_count` initialization.
-- Use Python 3.11+ `StrEnum` in place of the `str, Enum` combination to address UP042. This may change `str(TaskState.X)` semantics and MUST be evaluated by the full test suite and an independent reviewer before merging; serialization compatibility still requires a follow-up explicit check.
+- Use Python 3.11+ `StrEnum` for UP042, but explicitly delegate `__str__` to `Enum.__str__` to **preserve the previous public text representation** (e.g. `TaskState.RESERVED`). Add tests for both string equality and unchanged JSON serialization. An independent reviewer should still check downstream compatibility.
 
 ## Verification status and limits
 The changes are committed based on exact GitHub source and CI evidence. **No new passing test or clean Ruff claim applies until CI reruns on the exact new commit.** The prior 1,052-passing receipt belongs to an older commit; it cannot attest to this patch.

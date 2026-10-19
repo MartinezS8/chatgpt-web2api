@@ -360,7 +360,7 @@ See [PR-29 Ruff debt audit](ORCHESTRATOR_PR29_RUFF_SAFE_FIX_AUDIT.md).
 
 - [x] Review exact PR #31 HEAD `e28c368375409d3ff4a955fa59bb8c1d1cc8dbef`: [Actions run 39332816766](https://github.com/MartinezS8/chatgpt-web2api/actions/runs/39332816766) had **988 passed, 64 test setup errors and 20 passing subtests** on six OS/Python combinations, with 53 Ruff errors and no artifact build.
 - [x] Root cause: Ruff F401 'safe' removal deleted `store` imports acting as Pytest fixture registrations across three test modules. Re-export `store as store` explicitly and add cross-module fixture regression test.
-- [x] Rewrite identified 45 E701 and 5 E702 one-line constructs, preserve two F841 side-effect decisions and update str/Enum to Python 3.11 StrEnum for UP042.
+- [x] Rewrite identified 45 E701 and 5 E702 one-line constructs, preserve two F841 side-effect decisions and use Python 3.11 StrEnum for UP042 **while explicitly retaining Enum's previous `__str__` representation**; add JSON/string compatibility regression.
 - [ ] P0: **zero success assumed** until GitHub Actions exact new SHA proves all tests, postflight, Ruff and package build; check compat of `str(TaskState)` on released consumers.
 - [ ] P0: branch-controlled CI remains only untrusted diagnostics, not operator approval or authenticated live ChatGPT provider capability.
 
