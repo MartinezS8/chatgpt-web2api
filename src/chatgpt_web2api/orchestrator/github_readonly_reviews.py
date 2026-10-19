@@ -20,6 +20,7 @@ _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\Z")
 _BASE = re.compile(r"/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
 _REVIEWS = re.compile(r"/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pulls/[1-9][0-9]*/reviews\?per_page=100&page=1\Z")
 _PR = re.compile(r"/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pulls/[1-9][0-9]*\Z")
+_COMMIT = re.compile(r"/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/commits/[0-9a-f]{40}\Z")
 _PERMISSION = re.compile(r"/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/collaborators/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}/permission\Z")
 
 
@@ -45,7 +46,7 @@ class GitHubReviewsHTTP:
         self._opener = build_opener(_NoRedirect())
 
     def __call__(self, path: str) -> dict | list:
-        if not isinstance(path, str) or not any(p.fullmatch(path) for p in (_BASE, _PR, _REVIEWS, _PERMISSION)):
+        if not isinstance(path, str) or not any(p.fullmatch(path) for p in (_BASE, _PR, _REVIEWS, _PERMISSION, _COMMIT)):
             raise ValueError("GitHub review endpoint not permitted")
         headers = {
             "Accept": "application/vnd.github+json",
