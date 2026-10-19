@@ -33,16 +33,20 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 
 **Gate to pass:** provider write calls remain prohibited before authorization, and full test/CI evidence is green.
 
-## PR-03 (P1) — Worker registry and supervisor
+## PR-03 (P1) — Offline worker registry, scheduler, supervisor
 
-Planned modules: `orchestrator/worker_registry.py`, `scheduler.py`, `supervisor.py`, `capabilities.py`.
+**Implemented on `codex/orchestrator-v6-worker-scheduler` (Draft; not merged):** See [PR-03 technical notes](ORCHESTRATOR_PR03_WORKERS.md).
 
-- [ ] Stable worker IDs independent from slot numbers, browser targets, MCP session IDs and conversation IDs.
-- [ ] Bounded global concurrency, account throttling and capability gating; `stdio-singleton` cannot masquerade as 5 independent tabs.
-- [ ] Watchdog, heartbeat, pause/resume, stop/cancel and unknown-delivery reconciliation by a supported provider mechanism.
-- [ ] Fake transport tests for 1, 2 and 5 logical workers, duplicate claims and process crashes.
+- [x] Stable logical worker IDs independent from slot numbers, browser targets, MCP session IDs and conversation IDs.
+- [x] Per-account maximum five *registered logical workers*, unique session keys, mock-only enabled transport; a `stdio-singleton` does not become five web conversations.
+- [x] Atomic SQLite-backed task/worker claim with project/role matching, dependency and globally shared resource locks; sealed-package preflight, no external dispatch.
+- [x] Account scheduling pause/resume and bounded throttle; heartbeat storage and durable deduplicated stale-worker alerts.
+- [x] Offline 1/2/5-worker, duplicate claim, multi-process and restart tests; 48 passed + 8 subtests with V4 fixtures.
+- [ ] Provider-authenticated worker heartbeat; real session/target bindings and capability confirmation (only offline mock identities work).
+- [ ] Supported remote stop/cancel, provider-backed reconciliation and automatic supervisor daemon with safe liveness policy (NOT implemented).
+- [ ] Full V5/upstream suite + Windows CI and independently reviewed release gates (deferred for Codex phase).
 
-**Acceptance:** no claim collision; no unattended re-send; reproducible status after a restart.
+**Acceptance so far:** no mock-worker claim collision; no unattended re-send; reproducible local worker registry on restart. **Do not describe this as live 5-agent ChatGPT support.**
 
 ## PR-04 (P1) — Callback, verification, independent review, planning
 
