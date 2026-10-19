@@ -9,7 +9,9 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 3. [PR #3](https://github.com/MartinezS8/chatgpt-web2api/pull/3): PR-02B resource authority → PR #2 (Draft).
 4. [PR #4](https://github.com/MartinezS8/chatgpt-web2api/pull/4): PR-02C immutable packages and dispatch outbox → PR #3 (Draft).
 5. [PR #5](https://github.com/MartinezS8/chatgpt-web2api/pull/5): PR-03 mock-only worker registry / bounded scheduler / supervisor → PR #4 (Draft).
-6. PR-04: offline-only persisted callbacks, SHA-bound simulated evidence, independent mock-review ledger, bounded fix proposals → PR #5 (Draft).
+6. [PR #6](https://github.com/MartinezS8/chatgpt-web2api/pull/6): offline callback/evidence/review mock ledger → PR #5 (Draft).
+7. [PR #7](https://github.com/MartinezS8/chatgpt-web2api/pull/7): read-only Codex CLI/MCP observer → PR #6 (Draft).
+8. PR-06A: sealed-package mock upload receipts and per-message app/model capability gate → PR #7 (Draft).
 
 **Why no GitHub Issues?** GitHub returned HTTP 410, `Issues has been disabled in this repository`, while attempting to file this roadmap. This document is the canonical repository-side backlog until the repository owner decides to enable Issues. Do not silently turn Issues on.
 
@@ -68,20 +70,28 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 
 ## PR-05 (P1) — Low-token Codex CLI/MCP
 
-- [ ] Canonical JSON schemas and stable error codes for `submit`, `observe`, `subscribe`, `reconcile`, `pause`, `resume`, `request-review`, `plan`, `approve`.
-- [ ] Add minimal MCP tools that call the *same* controller authority as CLI; never create an independent mutable state.
-- [ ] Safe dry-run / fake transport, bounded polling, short status, and redaction of claim tokens and personal file paths.
+**Partially implemented in [PR #7](https://github.com/MartinezS8/chatgpt-web2api/pull/7):** [observer notes](ORCHESTRATOR_PR05_OBSERVER.md).
 
-**Acceptance:** a Codex controller can run a fake-agent plan end-to-end without browser/model calls.
+- [x] Read-only Codex CLI/MCP state queries: status, bounded event/callback cursors, worker list, evidence, review and proposals. Same SQLite authority, protected read-only URI, prompts/claim tokens/session IDs redacted.
+- [x] MCP tools are deliberately **read-only**; no hidden mutation tool in registry. 6 targeted local offline tests.
+- [ ] Authenticated remote callback subscription, task submit/observe/reconcile, human-approved plan/merge, mutation tool authorization, stable error schemas.
+- [ ] End-to-end mock-agent DAG demonstration with one authoritative control surface.
+- [ ] Full MCP 1.26 handshake on real client, packaging, Ruff and Windows CI.
 
-## PR-06 (P1) — Authorized attachments, skills and ChatGPT apps/plugins
+**Acceptance so far:** Codex can inspect fake-worker workflow data without side effects; cannot execute external actions.
 
-- [ ] Adapter that uploads the exact `TaskPackages` content-addressed snapshot via a transport that explicitly supports upload.
-- [ ] Verify per-file remote attachment IDs, sizes/types, send-time status and quota; block send on partial/mismatched upload.
-- [ ] Per-message app availability/permission preflight; handle approval prompts by a real user's explicit action, never auto-confirm.
-- [ ] Reject unsupported capabilities and never claim full ChatGPT Plus parity from a generic MCP transport.
+## PR-06 (P1) — Attachments, skills and ChatGPT apps/plugins
 
-**Acceptance:** three-file round trip + corrupted/unsupported/quota/approval negative cases under authorized test account.
+**PR-06A offline mock readiness implemented as Draft:** [technical notes](ORCHESTRATOR_PR06_UPLOAD_PREFLIGHT.md).
+
+- [x] Sealed `TaskPackages` manifest and content-addressed snapshot passed to a mock upload adapter; SHA/size/media-type + distinct fake receipt IDs checked; changed task reservation rejected after adapter work.
+- [x] Explicit per-message app availability **and** selection and exact mock model/effort verified. Pending user approval blocks; mock-only `live_send_permitted=False`.
+- [x] 11 targeted local tests, including partial/corrupted receipts, mismatched effort/model, unsupported app, user approval and race.
+- [ ] Live authorized upload adapter and provider-acknowledged attachment IDs/hash verification, quotas and file-type handling; existing code is **NOT a ChatGPT upload**.
+- [ ] Hosted plugin selection/permissions in a real account, user-mediated consent, skills upload, plan/modality parity testing.
+- [ ] Full stacked tests/CI/Windows and real three-file approved E2E round trip.
+
+**Acceptance so far:** simulated partial/mismatched upload cannot mark a task mock-ready; no real account actions.
 
 ## PR-07 (P1) — Supported model/transport integration
 
