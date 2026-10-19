@@ -12,6 +12,7 @@ import time
 from typing import Protocol
 
 from .store import Store
+from .upload_intents import UploadIntents
 
 
 class MockAttachmentAdapter(Protocol):
@@ -27,6 +28,7 @@ class UploadPreflight:
         if store.path != packages.store.path:
             raise ValueError("package and preflight must share one controller DB")
         self.store, self.packages = store, packages
+        self.intents = UploadIntents(store, packages)
         with store._connect() as db:
             db.execute("""CREATE TABLE IF NOT EXISTS orchestrator_mock_upload_preflight (
                 task_id TEXT PRIMARY KEY REFERENCES tasks(task_id),
@@ -107,20 +109,13 @@ class UploadPreflight:
                     "attachment_count": len(json.loads(previous["receipts_json"])),
                     "assurance": "offline_mock_only",
                 }
-        receipts=[]
-        seen=set()
-        for att in package["attachments"]:
-            # Transport gets the *snapshot*, never the original user path.
-            blob = self.packages.blob_root / att["sha256"]
-            ack=uploader.upload(dict(att), str(blob))
-            if (ack.get("sha256") != att["sha256"] or ack.get("size") != att["size"]
-                    or ack.get("media_type") != att["media_type"] or
-                    not isinstance(ack.get("remote_id"),str) or
-                    not ack["remote_id"].startswith("fake:") or ack["remote_id"] in seen):
-                raise ValueError("partial, mismatched or duplicate upload receipt")
-            seen.add(ack["remote_id"])
-            receipts.append({"name":att["name"],"sha256":att["sha256"],
-                             "remote_id":ack["remote_id"],"size":att["size"]})
+        # PR-16: every mock upload must have an atomic durable per-file
+        # intent *before* the side effect. Concurrent/unknown attempts are
+        # never replayed, even if the final preflight seal is missing.
+        receipts = self.intents.perform_mock(
+            task_id=task_id, worker_id=worker_id,
+            claim_token=task["claim_token"], uploader=uploader,
+        )
         cap_digest=capability_digest
         snapshot={"worker_id":worker_id,"package_sha256":package["package_sha256"],
                   "receipts":receipts,"capability_digest":cap_digest,"model":model,
