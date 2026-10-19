@@ -43,7 +43,9 @@ def inputs(tmp_path):
             CREATE TABLE orchestrator_worker_assignments(task_id TEXT,worker_id TEXT,state TEXT);""")
         d.execute("INSERT INTO orchestrator_workers VALUES('w1','mock',1)")
         d.execute("INSERT INTO orchestrator_worker_assignments VALUES('t1','w1','active')")
-        d.execute("UPDATE tasks SET state='reserved' WHERE task_id='t1'")
+    # Use an actual fenced pre-send claim; a manually asserted 'reserved'
+    # state lacks the token/lease required by the upload intent ledger.
+    assert store.claim("p") is not None
     root=tmp_path/"blobs";root.mkdir()
     return store,UploadPreflight(store,FakePackages(store,root))
 
