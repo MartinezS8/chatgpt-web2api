@@ -8,6 +8,7 @@ from .controller import Controller, Transport, TransportResult, Verifier
 from .evidence import EvidenceLedger, GitHubEvidenceProbe
 from .planner import Planner
 from .provider_evidence import ProviderEvidenceLedger
+from .github_readonly_reviews import GitHubReadOnlyReviews, GitHubReviewsHTTP, ReviewObservation
 from .review_policy import ReviewLedger
 from .outbox import DispatchOutbox
 from .resource_registry import ResourceIdentity, ResourceRegistry
@@ -21,7 +22,8 @@ from .worker_registry import WorkerRegistry, WorkerSpec
 
 __all__ = [
     "UploadPreflight", "CallbackInbox", "EvidenceLedger", "GitHubEvidenceProbe", "Planner", "ReviewLedger",
-    "Controller", "DispatchOutbox", "ProviderEvidenceLedger", "ResourceIdentity", "ResourceRegistry",
+    "Controller", "DispatchOutbox", "ProviderEvidenceLedger", "GitHubReadOnlyReviews", "GitHubReviewsHTTP",
+    "ReviewObservation", "ResourceIdentity", "ResourceRegistry",
     "Store", "TaskPackages", "TaskSpec", "TaskState", "Transport",
     "TransportResult", "Verifier", "Scheduler", "Supervisor", "WorkerRegistry", "WorkerSpec", "UploadIntents",
 ]

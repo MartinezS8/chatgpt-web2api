@@ -21,7 +21,8 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 15. [PR #18](https://github.com/MartinezS8/chatgpt-web2api/pull/18): wire existing mock preflight to atomic upload intents, fence replay and seal to current claim → PR #17 (Draft).
 16. [PR #19](https://github.com/MartinezS8/chatgpt-web2api/pull/19): strict read-only GitHub PR/Actions evidence gate, no finalization permissions → PR #18 (Draft).
 17. [PR #20](https://github.com/MartinezS8/chatgpt-web2api/pull/20): task/outbox/package-scoped immutable provider observation, with atomic post-GET race check; no state promotion → PR #19 (Draft).
-18. **PR #21 (this branch)**: read-only GitHub evidence restricted to trusted push events, same-repository head SHA and explicitly required successful CI jobs → PR #20 (Draft).
+18. [PR #21](https://github.com/MartinezS8/chatgpt-web2api/pull/21): read-only GitHub evidence restricted to trusted push events, same-repository head SHA and explicitly required successful CI jobs → PR #20 (Draft).
+19. **PR #22 (this branch)**: independent read-only GitHub reviewer permission/identity and SHA verification, no task finalization → PR #21 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -218,6 +219,20 @@ See [PR-18 task-bound provider design](ORCHESTRATOR_PR18_PROVIDER_EVIDENCE_BINDI
 - [ ] Provider-attested reviewer identity + transactional finalizer and actual authorized transport remain separate unimplemented gates.
 
 See [PR-19 GitHub CI hardening](ORCHESTRATOR_PR19_CI_EVENT_AND_JOBS_POLICY.md). The constructor of `GitHubReadOnlyEvidence` now requires `required_job_names`; callers must pass the trusted configured policy.
+
+## PR-20 (P0) — GitHub read-only reviewer identity and commit attestation (PR #22)
+
+- [x] Provider GET-only review observer `github_readonly_reviews.py`; read exact repository, PR, review list and collaborator permission API endpoints.
+- [x] Operator-controlled numeric GitHub reviewer ID allowlist and approval threshold; PR author and trusted implementation worker are always ineligible. Reviewer must have current write/admin permission, same immutable user ID.
+- [x] Require approved review for the exact current SHA; reject open change requests, dismissed/stale approvals, draft/closed/moved PR, untrusted reviewer or incomplete/100-entry history.
+- [x] Recheck PR HEAD after fetching reviews and permissions; **no** production finalization, merge permission, or external action.
+- [x] **53 new offline tests**; combined staged V4/PR04/provider/CI/review regression suite **174 tests + 8 subtests**, Python 3.13/Linux. GitHub source and test blobs match exact tested bytes; no full assembled checkout, Ruff or Windows CI claimed.
+- [x] Actual GitHub connected read confirmed **zero submitted reviews on PR #21**, so successful live-review assurance is currently unavailable and must not be fabricated.
+- [ ] **P0 next:** bind the new read-only review observation to a specific `ProviderEvidenceLedger` task/attempt/package/commit and independently authenticated implementer GitHub identity, then require fresh finalization-bound revalidation.
+- [ ] Workflow-source provenance, real provider-backed reviewers and signed/authorized task finalization, full-stack Ruff/Windows/3.11/3.12 tests remain pending.
+- [ ] No live ChatGPT Plus plugin/app, file upload, verified GPT-6 High selection or agent transport is implied.
+
+See [PR-20 technical review](ORCHESTRATOR_PR20_READONLY_REVIEW_VERIFICATION.md). As requested, GitHub Issues are not required; Codex can consume this Markdown tracker directly.
 
 ## PR-08 (P2) — Windows lifecycle and release
 
