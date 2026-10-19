@@ -6,7 +6,9 @@ from dataclasses import asdict
 import pytest
 
 from chatgpt_web2api.orchestrator.github_readonly_reviews import (
-    GitHubReadOnlyReviews, GitHubReviewsHTTP, _NoRedirect,
+    GitHubReadOnlyReviews,
+    GitHubReviewsHTTP,
+    _NoRedirect,
 )
 
 SHA = 'b' * 40

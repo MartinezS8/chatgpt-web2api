@@ -9,8 +9,9 @@ from __future__ import annotations
 import json
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -71,7 +72,7 @@ class GitHubReadOnlyHTTP:
                     raise RuntimeError("GitHub evidence GET did not return HTTP 200")
                 # Reject oversized API responses instead of buffering indefinitely.
                 payload = response.read(1024 * 1024 + 1)
-        except (HTTPError, URLError, OSError) as exc:
+        except (HTTPError, URLError, OSError):
             # Do not expose response bodies, auth headers or potentially
             # sensitive provider diagnostic messages to untrusted observers.
             raise RuntimeError("GitHub evidence read failed") from None

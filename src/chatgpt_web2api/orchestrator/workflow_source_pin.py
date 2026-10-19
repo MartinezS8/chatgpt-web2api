@@ -9,8 +9,8 @@ import base64
 import binascii
 import hashlib
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable
 
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
 _SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\Z")

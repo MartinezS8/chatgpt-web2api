@@ -10,8 +10,9 @@ import json
 import math
 import re
 import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from typing import Callable, Mapping, Protocol
+from typing import Protocol
 
 from .github_readonly_reviews import GitHubReviewsHTTP
 from .store import Store

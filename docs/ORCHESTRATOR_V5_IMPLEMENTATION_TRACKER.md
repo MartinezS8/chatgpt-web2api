@@ -30,7 +30,8 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 24. [PR #27](https://github.com/MartinezS8/chatgpt-web2api/pull/27): verify local tests against exact clean Git HEAD, fail closed on mismatch, distinguish smoke from complete local verification → PR #26 (Draft).
 25. [PR #28](https://github.com/MartinezS8/chatgpt-web2api/pull/28): close post-test checkout TOCTOU and inherited Git/pytest environment override paths → PR #27 (Draft).
 26. [PR #29](https://github.com/MartinezS8/chatgpt-web2api/pull/29): read-only feature branch CI with 6 system/Python cells → PR #28 (Draft).
-27. **PR #30 (this branch)**: repair CI contract, explicit disabled-worker rejection, stale upload-claim test and Windows SQLite cleanup → PR #29 (Draft).
+27. [PR #30](https://github.com/MartinezS8/chatgpt-web2api/pull/30): repair CI contract, disabled-worker checks, upload fencing and Windows SQLite cleanup → PR #29 (Draft).
+28. **PR #31 (this branch)**: close last error-message test regression and stage Ruff's verified safe cleanups without waiving lint → PR #30 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -342,6 +343,17 @@ See [PR-27 branch validation diagnostics](ORCHESTRATOR_PR27_BRANCH_CI_DIAGNOSTIC
 - [ ] P0: diagnostics is not protected/owner-trusted workflow evidence and cannot authorize provider actions.
 
 See [PR-28 CI test repairs](ORCHESTRATOR_PR28_CI_TEST_FAILURE_REPAIRS.md).
+
+## PR-29 (P0) — Full offline tests green, Ruff source debt being reduced (Draft PR #31)
+
+- [x] Exact SHA `c044c1348380daed259da4b37d08fac88ba7b848` in diagnostic Actions run [39331259834](https://github.com/MartinezS8/chatgpt-web2api/actions/runs/39331259834): **1052 passed + 20 subtests** on each of Linux/Windows/macOS Python 3.11 and 3.12, postflight clean and expected HEAD matched. No E2E tests (31 deselected).
+- [x] Fix remaining regression `test_reviewer_rejects_disabled_or_cross_project_implementer` by checking fail-closed enabled-worker rejection and no saved decision; mock security policy unchanged.
+- [x] Run nonmutating Ruff inventory: exactly **115** findings with rule counts E701=45, F811=25, I001=15, F401=14, UP035=6, E702=5, F841=3, UP017=1, UP042=1. `ruff check --fix --diff` showed 23 file patches/28 hunks with 44 proposed safe changes and no unsafe-fix opt-in.
+- [x] Against the pinned source, validate each context/delete/add hunk against the original GitHub contents and stage the resulting 23 exact Git blobs in one atomic reviewed PR commit. No CI-driven write or automatic unsafe lint refactor.
+- [ ] P0: confirm `pytest`, Ruff and package build on the **new** commit. Remaining E701/F811/E702 and other lint findings must be resolved without disabling rules.
+- [ ] P0: this diagnostic workflow remains branch-editable/untrusted, not protected CI or live permission. No merge or provider actions authorized.
+
+See [PR-29 Ruff debt audit](ORCHESTRATOR_PR29_RUFF_SAFE_FIX_AUDIT.md).
 
 ## PR-08 (P2) — Windows lifecycle and release
 

@@ -5,16 +5,20 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 
 import pytest
+from test_orchestrator_github_readonly_reviews import Provider, review
+from test_orchestrator_provider_evidence import (
+    SHA,
+    STAMP,
+    FakeReader,
+    gate,
+    inspect,
+)
 
 from chatgpt_web2api.orchestrator.github_readonly_reviews import (
-    GitHubReadOnlyReviews, ReviewObservation,
+    GitHubReadOnlyReviews,
 )
 from chatgpt_web2api.orchestrator.provider_evidence import ProviderEvidenceLedger
 from chatgpt_web2api.orchestrator.task_review_evidence import TaskReviewEvidenceLedger
-from test_orchestrator_provider_evidence import (
-    FakeReader, SHA, STAMP, gate, inspect, store,
-)
-from test_orchestrator_github_readonly_reviews import Provider, review
 
 
 class Reviewer(Provider):

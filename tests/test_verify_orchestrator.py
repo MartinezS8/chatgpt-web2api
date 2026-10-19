@@ -9,7 +9,6 @@ from pathlib import Path
 
 import pytest
 
-
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "verify_orchestrator.py"
 MODULE_SPEC = importlib.util.spec_from_file_location("local_verification_gate", SCRIPT)
 assert MODULE_SPEC and MODULE_SPEC.loader

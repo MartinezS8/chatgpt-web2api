@@ -1,9 +1,12 @@
 """Source/identity hardening tests using deterministic GitHub REST replies."""
 import base64
 import hashlib
+
 import pytest
+
 from chatgpt_web2api.orchestrator.workflow_source_pin import (
-    WorkflowSourcePin, WorkflowSourceObservation,
+    WorkflowSourceObservation,
+    WorkflowSourcePin,
 )
 
 HEAD = "a" * 40

@@ -4,7 +4,9 @@ import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+
 from chatgpt_web2api.orchestrator.cli import main
+
 
 class PackageCLITests(unittest.TestCase):
     def test_seal_and_inspect_without_disclosing_prompt(self):

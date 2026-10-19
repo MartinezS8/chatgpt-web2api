@@ -10,7 +10,7 @@ import hashlib
 import json
 import math
 import time
-from typing import Callable
+from collections.abc import Callable
 
 from .github_readonly_reviews import GitHubReadOnlyReviews, ReviewObservation
 from .provider_evidence import ProviderEvidenceLedger
