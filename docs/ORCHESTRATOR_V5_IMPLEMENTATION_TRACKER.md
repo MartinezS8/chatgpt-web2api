@@ -12,10 +12,17 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 6. [PR #6](https://github.com/MartinezS8/chatgpt-web2api/pull/6): offline callback/evidence/review mock ledger → PR #5 (Draft).
 7. [PR #7](https://github.com/MartinezS8/chatgpt-web2api/pull/7): read-only Codex CLI/MCP observer → PR #6 (Draft).
 8. [PR #8](https://github.com/MartinezS8/chatgpt-web2api/pull/8): sealed-package mock upload receipts and per-message app/model capability gate → PR #7 (Draft).
+9. [PR #10](https://github.com/MartinezS8/chatgpt-web2api/pull/10): independent integration hardening for observer, worker recovery and mock upload preflight → PR #8 (Draft).
+10. [PR #12](https://github.com/MartinezS8/chatgpt-web2api/pull/12): bind mock GitHub evidence to canonical task repository lock, require completed CI, redact callback messages → PR #10 (Draft).
 
-**Why no GitHub Issues?** GitHub returned HTTP 410, `Issues has been disabled in this repository`, while attempting to file this roadmap. This document is the canonical repository-side backlog until the repository owner decides to enable Issues. Do not silently turn Issues on.
+**De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
+
+**GitHub Issues are optional.** The owner prefers this Markdown tracker as the canonical backlog. GitHub Issues remain disabled and do not need to be enabled.
 
 ## Implemented in the current stacked code
+
+**PR #12 safety patch (mock-only):** GitHub proof must match the task's canonical repository lock, a simulated successful CI run must also have `status=completed`, and local callback progress stores redacted messages. Three negative regression tests were added. Full Codex checkout tests are still required; do not mark these as live provider integrations.
+
 
 - [x] Local SQLite WAL task store with pre-dispatch fencing; conservative unknown-delivery quarantine (PR #2).
 - [x] Operator-asserted aliases for canonical GitHub numeric repository IDs, Supabase project references / environment, Vercel project IDs / environment; no provider permissions claimed (PR #3).
