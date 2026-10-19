@@ -38,6 +38,14 @@ jobs:
       - name: Install developer dependencies
         shell: bash
         run: python -m pip install -e '.[dev]'
+      # Read-only lint investigation: the proposal is never applied in CI.
+      # This diagnostic cannot override the strict lint gate below.
+      - name: Ruff inventory and safe-fix diff (diagnostic only)
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.11'
+        shell: bash
+        run: |
+          python -m ruff check src/ tests/ --output-format concise || true
+          python -m ruff check src/ tests/ --fix --diff || true
       - name: Full non-E2E verification against pushed Git SHA
         shell: bash
         env:
