@@ -37,14 +37,14 @@ python -m chatgpt_web2api.orchestrator --json worker-claim --account personal --
 
 ## Test matrix
 
-Local Python 3.13 `pytest` using V4 offline test fixtures plus new PR-03 modules: **47 passed, 8 subtests passed**. Included: registration idempotence, duplicate session rejection, disabled real transport, five-worker cap, missing sealed inputs, role matching, global resource conflict, dependencies, pause/throttle, stale worker alerts, restart persistence and `multiprocessing.spawn` concurrent claims. A test seam emulates the existence of sealed packages; the actual V5 `TaskPackages` integration and full upstream suite still require PR-level CI/E2E checks. `python -m compileall` passes.
+Local Python 3.13 `pytest` using V4 offline test fixtures plus new PR-03 modules: **48 passed, 8 subtests passed**. Included: registration idempotence, duplicate session rejection, disabled real transport, five-worker cap, missing sealed inputs, role matching, global resource conflict, dependencies, pause/throttle, stale worker alerts, restart persistence and `multiprocessing.spawn` concurrent claims. A test seam emulates the existence of sealed packages; the actual V5 `TaskPackages` integration and full upstream suite still require PR-level CI/E2E checks. `python -m compileall` passes.
 
 ## Limitations and follow-on gates
 
 1. Registry IDs are locally asserted, **not provider-verified identities or permissions**. No credentials are read or stored.
 2. The SQLite DB is a single authority. Multiple separate DB files cannot enforce shared locks. Windows SQLite storage and ACL review remain PR-08 work.
 3. `WorkerRegistry.heartbeat()` is a **local liveness hint**, not authenticated evidence of completion. Workers marked stale remain holding slots/locks until manual/provider-backed reconciliation; no remote cancellation is attempted.
-4. The `Scheduler` checks content before and in its atomic claim, but the future outbox/upload transport must re-verify the snapshot immediately before the remote effect.
+4. The `Scheduler` pre-checks content before its atomic claim (the database transaction fences the claim, not the content snapshot); the future outbox/upload transport must re-verify the snapshot immediately before the remote effect.
 5. There is no event-driven long-running daemon yet, only durable control-plane primitives and bounded explicit commands. PR-04/05 must add callback adapters, error codes and low-token event subscriptions.
 6. Existing V3 `Controller.dispatch` and direct `Store.claim` paths are **not redirected** by this PR. A production transport must be routed exclusively through the authoritative TaskPackages + WorkerRegistry + DispatchOutbox path after gated integration tests.
 7. Even after implementation, browser automation needs separate service authorization and must not circumvent account/model limits or approvals. Official Codex app-server sessions and ChatGPT web chats are different product surfaces; do not claim Plus-hosted apps are present in the former.
