@@ -20,7 +20,8 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 14. [PR #17](https://github.com/MartinezS8/chatgpt-web2api/pull/17): durable per-file upload intents and persistent unknown-receipt quarantine (mock-only) → PR #16 (Draft).
 15. [PR #18](https://github.com/MartinezS8/chatgpt-web2api/pull/18): wire existing mock preflight to atomic upload intents, fence replay and seal to current claim → PR #17 (Draft).
 16. [PR #19](https://github.com/MartinezS8/chatgpt-web2api/pull/19): strict read-only GitHub PR/Actions evidence gate, no finalization permissions → PR #18 (Draft).
-17. **PR #20 (this branch)**: task/outbox/package-scoped immutable provider observation, with atomic post-GET race check; no state promotion → PR #19 (Draft).
+17. [PR #20](https://github.com/MartinezS8/chatgpt-web2api/pull/20): task/outbox/package-scoped immutable provider observation, with atomic post-GET race check; no state promotion → PR #19 (Draft).
+18. **PR #21 (this branch)**: read-only GitHub evidence restricted to trusted push events, same-repository head SHA and explicitly required successful CI jobs → PR #20 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -204,6 +205,19 @@ See [PR-17 provider adapter design](ORCHESTRATOR_PR17_GITHUB_READONLY_EVIDENCE.m
 - [ ] Build provider-attested independent review and a **separate trusted finalizer** with fresh current SHA, user consent and atomic state transition; current `ProviderEvidenceLedger.production_finalization_permitted()` always returns False.
 
 See [PR-18 task-bound provider design](ORCHESTRATOR_PR18_PROVIDER_EVIDENCE_BINDING.md). Uploads, callbacks, ChatGPT models/apps and any production transport remain distinct unfinished gates.
+
+## PR-19 (P0) — CI workflow trigger, head source and required-job policy (PR #21)
+
+- [x] Mandatory trusted job-name allowlist passed via controller-owned `required_job_names`; reject missing, duplicated, failed, stale and incomplete/paginated jobs.
+- [x] Only accept exact `push` event on the reviewed PR's branch SHA, from the same trusted numeric repository ID. `workflow_dispatch` and `pull_request` refuse until separate event-specific provenance verification is implemented.
+- [x] GitHub REST reader limited to exact run + latest-attempt jobs endpoint; no arbitrary query parameters, redirects or write actions.
+- [x] Recheck PR head after job inspection. Read-only result has **no** finalization or send permissions.
+- [x] Local focused and V4/PR04/provider staged regression run: **119 passed, 8 subtests**; Python compile check green. Full stacked checkout/Windows/Ruff/live API are **not** verified.
+- [ ] Current `.github/workflows/ci.yml` triggers push on `master` only, and PR against `master` only; no qualifying push job for stacked feature branches. Codex/owner must define a secure branch workflow and validate it rather than relaxing proof.
+- [ ] Pin/protect workflow source, required jobs/check policy and workflow permissions; do not infer trust solely from a successful run on agent-modifiable workflow code.
+- [ ] Provider-attested reviewer identity + transactional finalizer and actual authorized transport remain separate unimplemented gates.
+
+See [PR-19 GitHub CI hardening](ORCHESTRATOR_PR19_CI_EVENT_AND_JOBS_POLICY.md). The constructor of `GitHubReadOnlyEvidence` now requires `required_job_names`; callers must pass the trusted configured policy.
 
 ## PR-08 (P2) — Windows lifecycle and release
 
