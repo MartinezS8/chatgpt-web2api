@@ -29,7 +29,8 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 23. [PR #26](https://github.com/MartinezS8/chatgpt-web2api/pull/26): persist pinned CI workflow blob in fenced task evidence and transitive review digests; preserve legacy read-only receipts → PR #25 (Draft).
 24. [PR #27](https://github.com/MartinezS8/chatgpt-web2api/pull/27): verify local tests against exact clean Git HEAD, fail closed on mismatch, distinguish smoke from complete local verification → PR #26 (Draft).
 25. [PR #28](https://github.com/MartinezS8/chatgpt-web2api/pull/28): close post-test checkout TOCTOU and inherited Git/pytest environment override paths → PR #27 (Draft).
-26. **PR #29 (this branch)**: push-only feature-branch validation workflow with read-only six-platform/Python checks and diagnostics; NOT an authoritative release workflow → PR #28 (Draft).
+26. [PR #29](https://github.com/MartinezS8/chatgpt-web2api/pull/29): read-only feature branch CI with 6 system/Python cells → PR #28 (Draft).
+27. **PR #30 (this branch)**: repair CI contract, explicit disabled-worker rejection, stale upload-claim test and Windows SQLite cleanup → PR #29 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -328,6 +329,19 @@ See [PR-26 verifier postflight and environment design](ORCHESTRATOR_PR26_VERIFIE
 - [ ] P0: GitHub hosted runner/PyPI dependency provenance, protected workflow pin, reviewer/worker identity, explicit consent and finalizer remain separate blockers.
 
 See [PR-27 branch validation diagnostics](ORCHESTRATOR_PR27_BRANCH_CI_DIAGNOSTICS.md).
+
+## PR-28 (P0) — CI full-suite regressions repaired (Draft PR #30)
+
+- [x] Github Actions exact PR #29 HEAD `497e13cb586364cbe10195de0815dcc6fc05ca1e` reached complete non-E2E pytest on 6 Linux/macOS/Windows + Python 3.11/3.12 runners, showing **1048 passed / 3 failed** on Linux and macOS, **1047 passed / 4 failed** on Windows. 20 additional subtests passed.
+- [x] Fix developer workflow contract assertion to allow bounded `--diagnostics` without weakening `--full --strict --expected-sha` requirements.
+- [x] Separate disabled reviewer or implementer into explicit fail-closed check, with parameterized negative tests and assurance no decision is persisted.
+- [x] Keep claim-token mismatch rejected by durable upload intent; align stale-receipt test to actual assertion and verify no second upload.
+- [x] Close SQLite legacy test creation handle explicitly after commit, so Windows temp-file cleanup can succeed.
+- [ ] P0: re-run all 6 CI matrix cells on exact latest SHA; no successful suite claimed before results.
+- [ ] P0: Ruff still reports 115 violations in baseline; do not disable lint. Audit and fix, then require clean full matrix and artifact build.
+- [ ] P0: diagnostics is not protected/owner-trusted workflow evidence and cannot authorize provider actions.
+
+See [PR-28 CI test repairs](ORCHESTRATOR_PR28_CI_TEST_FAILURE_REPAIRS.md).
 
 ## PR-08 (P2) — Windows lifecycle and release
 

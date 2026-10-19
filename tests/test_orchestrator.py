@@ -4,6 +4,7 @@ import sqlite3
 import time
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 
 from chatgpt_web2api.orchestrator import Controller, Store, TaskSpec, TaskState
@@ -236,7 +237,9 @@ class OrchestratorTests(unittest.TestCase):
 
     def test_v3_legacy_migration_quarantines_active_rows(self):
         path = Path(self.temp.name) / "legacy.sqlite"
-        with sqlite3.connect(path) as conn:
+        # sqlite3's context manager commits but does not close the handle.
+        # On Windows, TemporaryDirectory cleanup otherwise hits WinError 32.
+        with closing(sqlite3.connect(path)) as conn, conn:
             conn.execute("""CREATE TABLE tasks(task_id TEXT PRIMARY KEY,project_id TEXT NOT NULL,
                 role TEXT NOT NULL,prompt_sha TEXT NOT NULL, dependencies TEXT NOT NULL,
                 write_scopes TEXT NOT NULL,baseline_sha TEXT NOT NULL,review_of TEXT,

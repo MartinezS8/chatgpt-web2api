@@ -53,10 +53,12 @@ class ReviewLedger:
             implementer = db.execute("""SELECT account_id,project_id,role,transport,
                 enabled,session_key FROM orchestrator_workers WHERE worker_id=?""",
                                      (impl_w["worker_id"],)).fetchone()
-            if (not w or not implementer or w["role"] != "review"
-                    or implementer["role"] != "implement"
+            if not w or not implementer:
+                raise ValueError("reviewer/implementer identity, account, project or session mismatch")
+            if not w["enabled"] or not implementer["enabled"]:
+                raise ValueError("review requires an enabled mock review worker and implementer")
+            if (w["role"] != "review" or implementer["role"] != "implement"
                     or w["transport"] != "mock" or implementer["transport"] != "mock"
-                    or not w["enabled"] or not implementer["enabled"]
                     or w["account_id"] != implementer["account_id"]
                     or w["project_id"] != implementation["project_id"]
                     or implementer["project_id"] != implementation["project_id"]
