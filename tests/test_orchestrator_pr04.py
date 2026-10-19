@@ -11,12 +11,13 @@ from chatgpt_web2api.orchestrator.store import Store, TaskSpec
 SHA = "a" * 40
 
 class FakeProbe:
-    def __init__(self, head=SHA, conclusion="success", repository_id="123"):
-        self.head, self.conclusion, self.repo = head, conclusion, repository_id
+    def __init__(self, head=SHA, conclusion="success", repository_id="123", status="completed"):
+        self.head, self.conclusion, self.repo, self.status = head, conclusion, repository_id, status
     def inspect_pr(self, repository_id, pr_number):
         return {"repository_id": self.repo, "number": pr_number, "head_sha": self.head, "state": "open"}
     def inspect_run(self, repository_id, run_id):
-        return {"repository_id": self.repo, "id": run_id, "head_sha": self.head, "conclusion": self.conclusion}
+        return {"repository_id": self.repo, "id": run_id, "head_sha": self.head,
+                "status": self.status, "conclusion": self.conclusion}
 
 class MockOutbox:
     def __init__(self, store):
@@ -38,7 +39,8 @@ class MockOutbox:
 @pytest.fixture
 def db(tmp_path):
     store=Store(tmp_path/"scheduler.sqlite")
-    store.create(TaskSpec("build", "p", "implement", "do work"))
+    store.create(TaskSpec("build", "p", "implement", "do work",
+                          write_scopes=("github:repo/123",)))
     store.create(TaskSpec("review-1", "p", "review", "review work", review_of="build"))
     with store._connect() as d:
         d.executescript("""CREATE TABLE orchestrator_workers(worker_id TEXT PRIMARY KEY, role TEXT, transport TEXT, enabled INTEGER);
@@ -172,3 +174,30 @@ class MockOutboxExisting:
     def __init__(self, store): self.store=store
     def complete(self, *args): raise AssertionError("unused")
 
+def test_other_repository_proof_cannot_substitute(db, evid):
+    with db._connect() as d:
+        d.execute("UPDATE tasks SET write_scopes=? WHERE task_id='build'",
+                  ('["github:repo/777"]',))
+    with pytest.raises(ValueError, match="not in declared task scope"):
+        evid.inspect_mock(task_id="build",repository_id="123",pr_number=4,
+                          expected_head_sha=SHA,run_id=2,probe=FakeProbe())
+
+
+def test_ci_run_must_be_completed_not_just_success_label(db, evid):
+    with pytest.raises(ValueError, match="CI"):
+        evid.inspect_mock(task_id="build",repository_id="123",pr_number=4,
+                          expected_head_sha=SHA,run_id=2,probe=FakeProbe(status="in_progress"))
+
+
+def test_callback_progress_never_persists_raw_message(db):
+    outbox=MockOutbox(db)
+    with db._connect() as d:
+        d.execute("INSERT INTO orchestrator_dispatch_attempts VALUES ('a1','build','accepted','c1','m1')")
+    callback=CallbackInbox(db,outbox)
+    secret="never-store-sensitive-text-123"
+    assert callback.progress(attempt_id="a1",worker_id="dev",conversation_id="c1",
+                             delivery_id="m1",sequence=1,kind="progress",message=secret)
+    assert callback.events()[0]["message"]=="[redacted]"
+    with db._connect() as d:
+        row=d.execute("SELECT message FROM orchestrator_callback_inbox WHERE attempt_id='a1'").fetchone()
+        assert row["message"]=="[redacted]"
