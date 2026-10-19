@@ -17,7 +17,8 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 11. [PR #14](https://github.com/MartinezS8/chatgpt-web2api/pull/14): independent mock reviewer identity, role, account, project and session constraints → PR #12 (Draft).
 12. [PR #15](https://github.com/MartinezS8/chatgpt-web2api/pull/15): **disable untrusted assertion-only finalization**, prove unresolved write scopes stay locked; include latest PR #5 ancestry via a no-content-change merge → PR #14 (Draft).
 13. [PR #16](https://github.com/MartinezS8/chatgpt-web2api/pull/16): **default-deny legacy Controller.dispatch/poll** unless explicitly called as an offline test, without exposing this testing flag over MCP → PR #15 (Draft).
-14. **PR #17 (this branch)**: durable per-file upload intents and persistent unknown-receipt quarantine (mock-only) → PR #16 (Draft).
+14. [PR #17](https://github.com/MartinezS8/chatgpt-web2api/pull/17): durable per-file upload intents and persistent unknown-receipt quarantine (mock-only) → PR #16 (Draft).
+15. **PR #18 (this branch)**: wire existing mock preflight to atomic upload intents, fence replay and seal to current claim → PR #17 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -161,10 +162,21 @@ See [integration review](ORCHESTRATOR_REVIEW_PR08_PR10.md). Issues and GitHub Ac
 - [x] `acknowledge()`: size, MIME, digest and unique fake remote-ID validation before mock-ready state.
 - [x] `quarantine()`: unknown results never become automatic permission to retry or release a task write lock.
 - [x] 10 offline unit tests pass on Python 3.13, including 16 concurrent claim and per-file reservation attempts; full assembled suite/CI not run.
-- [ ] **P0 next:** integrate this ledger into existing `UploadPreflight.check_mock` uploader path. Until then, legacy mock preflight can perform duplicate concurrent upload calls; DO NOT attach live uploader.
+- [x] **PR #18:** integration implemented on this descendant: `UploadPreflight.check_mock` uses `UploadIntents.perform_mock`; exact claim-bound replay and final seal checked transactionally. Three integration regression cases added.
+- [ ] **Verification:** full assembled integration tests, Ruff and Windows CI not run; do not attach a live provider without authenticated receipt/identity adapter.
 - [ ] Live adapters: provider-authenticated file IDs, upload completion/size/hash proof, worker capabilities, quotas, user approval and active message/app selection; all remain unavailable.
 
 See [PR-15 durable upload intents](ORCHESTRATOR_PR15_UPLOAD_INTENTS.md). Keeping GitHub Issues/Actions optional for Codex phase does not waive review and release tests.
+
+### PR-16 (P0) — Mock UploadPreflight integration
+
+- [x] Atomic upload intent before each mock upload side effect, one concurrent uploader per task.
+- [x] Unknown receipt → quarantine; repeated preflight never uploads again without provider/manual reconciliation.
+- [x] Exact claim and package revalidated on replay and inside final persistence transaction.
+- [x] 3 negative/parallel integration tests committed; **not yet executed on entire current PR stack**.
+- [ ] Provider-certified remote receipt/approval and real quota checks; keep `live_send_permitted=False`.
+
+See [PR-16 integration details](ORCHESTRATOR_PR16_UPLOAD_INTEGRATION.md).
 
 ## PR-08 (P2) — Windows lifecycle and release
 
