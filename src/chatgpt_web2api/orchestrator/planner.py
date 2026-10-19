@@ -43,7 +43,11 @@ class RepairPlanner:
             if previous:
                 if previous["prompt"] != prompt:
                     raise ValueError("cannot overwrite immutable repair plan")
-                return {**dict(previous), "created": False}
+                return {"proposal_id": previous["proposal_id"],
+                        "target_task_id": previous["target_task_id"],
+                        "iteration": previous["iteration"],
+                        "source_head_sha": previous["source_head_sha"],
+                        "state": previous["state"], "created": False}
             count=db.execute("SELECT COUNT(*) FROM orchestrator_repair_proposals WHERE target_task_id=?",
                              (obs["target_task_id"],)).fetchone()[0]
             if count >= self.max_cycles:
