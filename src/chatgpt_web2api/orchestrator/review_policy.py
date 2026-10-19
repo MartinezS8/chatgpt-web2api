@@ -34,8 +34,9 @@ class ReviewLedger:
                 raise ValueError("implementation, review and evidence must all exist")
             if implementation["role"] != "implement" or implementation["state"] != TaskState.VERIFIED.value:
                 raise ValueError("implementation must be verified before review")
-            if review["role"] != "review" or review["review_of"] != target_task_id:
-                raise ValueError("review task is not an independent review of implementation")
+            if (review["role"] != "review" or review["review_of"] != target_task_id
+                    or review["project_id"] != implementation["project_id"]):
+                raise ValueError("review task must be independent and in the same project")
             if json.loads(review["write_scopes"]):
                 raise ValueError("review task must be read-only")
             if review["state"] != TaskState.VERIFIED.value:
@@ -46,10 +47,21 @@ class ReviewLedger:
             review_w = db.execute("SELECT worker_id FROM orchestrator_worker_assignments WHERE task_id=? AND state='active'", (reviewer_task_id,)).fetchone()
             if not impl_w or not review_w or impl_w["worker_id"] == review_w["worker_id"]:
                 raise ValueError("review must be assigned to a different live worker")
-            w = db.execute("SELECT role,transport,enabled FROM orchestrator_workers WHERE worker_id=?",
+            w = db.execute("""SELECT account_id,project_id,role,transport,
+                enabled,session_key FROM orchestrator_workers WHERE worker_id=?""",
                            (review_w["worker_id"],)).fetchone()
-            if not w or w["role"] != "review" or w["transport"] != "mock" or not w["enabled"]:
-                raise ValueError("reviewer identity is not an enabled mock review worker")
+            implementer = db.execute("""SELECT account_id,project_id,role,transport,
+                enabled,session_key FROM orchestrator_workers WHERE worker_id=?""",
+                                     (impl_w["worker_id"],)).fetchone()
+            if (not w or not implementer or w["role"] != "review"
+                    or implementer["role"] != "implement"
+                    or w["transport"] != "mock" or implementer["transport"] != "mock"
+                    or not w["enabled"] or not implementer["enabled"]
+                    or w["account_id"] != implementer["account_id"]
+                    or w["project_id"] != implementation["project_id"]
+                    or implementer["project_id"] != implementation["project_id"]
+                    or w["session_key"] == implementer["session_key"]):
+                raise ValueError("reviewer/implementer identity, account, project or session mismatch")
             payload = {"target_task_id": target_task_id, "reviewer_task_id": reviewer_task_id,
                        "head_sha": head_sha, "evidence_digest": evidence["digest"],
                        "implement_worker_id": impl_w["worker_id"], "reviewer_worker_id": review_w["worker_id"],
