@@ -17,6 +17,12 @@ from .outbox import DispatchOutbox
 from .resource_registry import ResourceIdentity, ResourceRegistry
 from .store import Store, TaskSpec
 from .task_packages import TaskPackages
+from .worker_commands import (
+    WORKER_COMMANDS,
+    WORKER_READ_COMMANDS,
+    configure_worker_commands,
+    execute_worker_command,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -78,6 +84,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--max-slots", type=int, default=5)
     s = commands.add_parser("recover", help="Requeue only expired pre-send leases; quarantine uncertain sends")
     s.add_argument("--project", required=True)
+    configure_worker_commands(commands)
     return p
 
 
@@ -113,17 +120,27 @@ def _public_task(row: dict | None) -> dict | None:
 
 
 def execute(args: argparse.Namespace) -> dict:
+    if args.command == "worker-capabilities":
+        from .capabilities import capabilities
+
+        return capabilities()
     if args.command == "capabilities":
         return _capabilities()
     if not args.db:
         raise ValueError("--db or CHATGPT_ORCHESTRATOR_DB must be set")
     db_path = Path(args.db).expanduser().resolve()
+    if args.command in WORKER_READ_COMMANDS and not db_path.is_file():
+        raise FileNotFoundError(f"database does not exist: {db_path}")
+    if args.command in WORKER_COMMANDS - WORKER_READ_COMMANDS:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
     # Reads must not accidentally create a blank DB and conceal configuration errors.
     if args.command in {"status", "list-tasks", "task", "events", "resolve-resource", "list-resources", "task-package", "delivery-events"} and not db_path.is_file():
         raise FileNotFoundError(f"database does not exist: {db_path}")
     if args.command in {"create-task", "claim", "recover", "register-resource", "seal-task", "ack-delivery-event", "reconcile-dispatch"}:
         db_path.parent.mkdir(parents=True, exist_ok=True)
     store = Store(db_path)
+    if args.command in WORKER_COMMANDS:
+        return execute_worker_command(args, store)
     if args.command in {"seal-task", "task-package", "delivery-events", "ack-delivery-event", "reconcile-dispatch"}:
         packages = TaskPackages(store, db_path.parent / "orchestrator_blobs")
         outbox = DispatchOutbox(store, packages)
