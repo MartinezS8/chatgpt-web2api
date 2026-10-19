@@ -173,6 +173,21 @@ class WorkerSchedulerTests(unittest.TestCase):
         self.assertEqual(len(set(x for x in assigned if x)),5)
         self.assertEqual(len(self.reg.assignments('a')),5)
 
+    def test_reclaimed_pre_send_task_reuses_released_assignment(self):
+        self.worker()
+        task_id = self.task()
+        first = self.scheduler.claim_next('a', 'p')
+        self.assertIsNotNone(first)
+        self.store.recover('p', now=first['task']['lease_until'] + 1)
+        self.assertEqual(self.store.get(task_id)['state'], 'queued')
+        second = self.scheduler.claim_next('a', 'p')
+        self.assertIsNotNone(second)
+        self.assertEqual(second['task']['task_id'], task_id)
+        self.assertNotEqual(second['task']['claim_token'], first['task']['claim_token'])
+        self.assertEqual(len(self.reg.assignments('a')), 1)
+        self.assertEqual(self.reg.assignments('a')[0]['claim_version'],
+                         second['task']['claim_version'])
+
     def test_mock_only_capacity_gate_no_external_transport_available(self):
         self.reg.register(WorkerSpec('real-1','a','p','implement','codex_app_server','thread:one',False))
         self.task()
