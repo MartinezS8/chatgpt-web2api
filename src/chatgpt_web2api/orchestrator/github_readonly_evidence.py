@@ -50,11 +50,11 @@ class GitHubReadOnlyHTTP:
 
     def __call__(self, path: str) -> dict:
         allowed_default = re.fullmatch(
-            r"/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/pulls/[0-9]+|/actions/runs/[0-9]+(?:/jobs\\?filter=latest&per_page=100)?)?", path)
+            r"/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/pulls/[0-9]+|/actions/runs/[0-9]+(?:/jobs\?filter=latest&per_page=100)?)?", path)
         allowed_workflow = re.fullmatch(
             r"/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/workflows/[0-9]+", path)
         allowed_pinned_content = re.fullmatch(
-            r"/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/contents/\\.github/workflows/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\\.(?:yml|yaml)\\?ref=[0-9a-f]{40}", path)
+            r"/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/contents/\.github/workflows/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\.(?:yml|yaml)\?ref=[0-9a-f]{40}", path)
         if not (allowed_default or allowed_workflow or allowed_pinned_content):
             raise ValueError("GitHub evidence path is not an allowed read-only endpoint")
         headers = {
