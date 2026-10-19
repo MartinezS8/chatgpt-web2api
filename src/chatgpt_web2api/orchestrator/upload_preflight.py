@@ -103,6 +103,11 @@ class UploadPreflight:
                 }
                 if recorded != expected:
                     raise ValueError("sealed preflight does not match current inputs")
+                self.intents.assert_ready_locked(
+                    db, task_id=task_id, worker_id=worker_id,
+                    claim_token=task["claim_token"],
+                    package_sha256=package["package_sha256"],
+                )
                 return {
                     "created": False, "mock_ready": True,
                     "live_send_permitted": False,
@@ -128,6 +133,13 @@ class UploadPreflight:
                 WHERE t.task_id=?""",(task_id,)).fetchone()
             if not row or row["state"] != "reserved" or row["worker_id"] != worker_id:
                 raise ValueError("task reservation changed during upload preflight")
+            # Prevent a stale claim/version from sealing a readiness result,
+            # even when a worker was reassigned between mock ACK and persistence.
+            self.intents.assert_ready_locked(
+                db, task_id=task_id, worker_id=worker_id,
+                claim_token=task["claim_token"],
+                package_sha256=package["package_sha256"],
+            )
             old=db.execute("SELECT * FROM orchestrator_mock_upload_preflight WHERE task_id=?",(task_id,)).fetchone()
             if old:
                 previous={"worker_id":old["worker_id"],"package_sha256":old["package_sha256"],
