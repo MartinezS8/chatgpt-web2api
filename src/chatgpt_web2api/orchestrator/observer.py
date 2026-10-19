@@ -72,7 +72,8 @@ class Observer:
 
     def reviews(self, target_task_id: str, limit: int = 50) -> dict:
         limit=self._count_or_error(limit, 50)
-        if not target_task_id: raise ValueError("target_task_id required")
+        if not target_task_id:
+            raise ValueError("target_task_id required")
         rows=self._read("""SELECT target_task_id,reviewer_task_id,head_sha,decision,assurance,created_at
             FROM orchestrator_review_decisions WHERE target_task_id=? ORDER BY created_at LIMIT ?""",
             (target_task_id,),limit=limit)
@@ -80,14 +81,16 @@ class Observer:
 
     def proposals(self, target_task_id: str, limit: int = 10) -> dict:
         limit=self._count_or_error(limit, 10)
-        if not target_task_id: raise ValueError("target_task_id required")
+        if not target_task_id:
+            raise ValueError("target_task_id required")
         rows=self._read("""SELECT id,target_task_id,reviewer_task_id,cycle,head_sha,status,created_at
             FROM orchestrator_fix_proposals WHERE target_task_id=? ORDER BY id LIMIT ?""",
             (target_task_id,),limit=limit)
         return {"proposals":rows}
 
     def evidence(self, task_id: str) -> dict:
-        if not task_id: raise ValueError("task_id required")
+        if not task_id:
+            raise ValueError("task_id required")
         rows=self._read("""SELECT task_id,repository_id,pr_number,head_sha,run_id,digest,assurance,recorded_at
             FROM orchestrator_evidence WHERE task_id=? LIMIT ?""",(task_id,),limit=1)
         return {"evidence": rows[0] if rows else None}

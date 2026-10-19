@@ -32,7 +32,8 @@ class MockOutbox:
             row=db.execute("SELECT * FROM orchestrator_dispatch_attempts WHERE attempt_id=?", (attempt_id,)).fetchone()
             if not row or row["conversation_id"]!=conversation_id or row["delivery_id"]!=delivery_id:
                 raise ValueError("invalid delivery")
-            if row["status"] == "completed":return False
+            if row["status"] == "completed":
+                return False
             db.execute("UPDATE orchestrator_dispatch_attempts SET status='completed' WHERE attempt_id=?", (attempt_id,))
             return True
 

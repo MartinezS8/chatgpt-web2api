@@ -22,10 +22,13 @@ class Caps:
         d={"transport":"mock","worker_id":worker_id,"model":"GPT-6","effort":"High",
            "upload_supported":True,"available_apps":["GitHub"],
            "selected_apps_this_message":["GitHub"],"user_approval_pending":False}
-        d.update(self.changes);return d
+        d.update(self.changes)
+        return d
 
 class Uploader:
-    def __init__(self,corrupt=False):self.corrupt=corrupt;self.seen=[]
+    def __init__(self,corrupt=False):
+        self.corrupt=corrupt
+        self.seen=[]
     def upload(self,att,path):
         self.seen.append(path)
         return {"remote_id":"fake:"+att["sha256"],"sha256":("oops" if self.corrupt else att["sha256"]),
@@ -43,7 +46,8 @@ def inputs(tmp_path):
     # Use an actual fenced pre-send claim; a manually asserted 'reserved'
     # state lacks the token/lease required by the upload intent ledger.
     assert store.claim("p") is not None
-    root=tmp_path/"blobs";root.mkdir()
+    root=tmp_path/"blobs"
+    root.mkdir()
     return store,UploadPreflight(store,FakePackages(store,root))
 
 
@@ -53,7 +57,8 @@ def run(gate,caps=None,uploader=None):
 
 
 def test_exact_two_file_mock_receipt_and_seal(inputs):
-    _,gate=inputs;uploader=Uploader()
+    _,gate=inputs
+    uploader=Uploader()
     result=run(gate,uploader=uploader)
     assert result["created"] and not result["live_send_permitted"]
     assert result["attachment_count"]==2
@@ -93,8 +98,10 @@ def test_changed_preflight_capabilities_rejected_before_reupload(inputs):
     (Caps(transport="chatgpt_ui"),"nonmock"),
     (Caps(upload_supported=False),"does not support uploads")])
 def test_unknown_capability_blocks_before_remote_upload(inputs,caps,match):
-    _,gate=inputs;upload=Uploader()
-    with pytest.raises(ValueError,match=match):run(gate,caps=caps,uploader=upload)
+    _,gate=inputs
+    upload=Uploader()
+    with pytest.raises(ValueError,match=match):
+        run(gate,caps=caps,uploader=upload)
     assert upload.seen==[]
 
 
@@ -107,7 +114,8 @@ def test_corrupt_receipt_denied(inputs):
 
 def test_unassigned_or_disabled_mock_worker_denied(inputs):
     store,gate=inputs
-    with store._connect() as d:d.execute("UPDATE orchestrator_workers SET enabled=0 WHERE worker_id='w1'")
+    with store._connect() as d:
+        d.execute("UPDATE orchestrator_workers SET enabled=0 WHERE worker_id='w1'")
     with pytest.raises(ValueError,match="not assigned"):
         run(gate)
 
@@ -116,7 +124,8 @@ def test_reservation_changed_rejects_receipts(inputs):
     store,gate=inputs
     class Disruption(Uploader):
         def upload(self,att,path):
-            with store._connect() as d:d.execute("UPDATE tasks SET state='needs_human' WHERE task_id='t1'")
+            with store._connect() as d:
+                d.execute("UPDATE tasks SET state='needs_human' WHERE task_id='t1'")
             return super().upload(att,path)
     with pytest.raises(ValueError,match="stale reservation"):
         run(gate,uploader=Disruption())

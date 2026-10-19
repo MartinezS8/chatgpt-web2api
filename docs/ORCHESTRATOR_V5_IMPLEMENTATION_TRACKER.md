@@ -31,7 +31,8 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 25. [PR #28](https://github.com/MartinezS8/chatgpt-web2api/pull/28): close post-test checkout TOCTOU and inherited Git/pytest environment override paths → PR #27 (Draft).
 26. [PR #29](https://github.com/MartinezS8/chatgpt-web2api/pull/29): read-only feature branch CI with 6 system/Python cells → PR #28 (Draft).
 27. [PR #30](https://github.com/MartinezS8/chatgpt-web2api/pull/30): repair CI contract, disabled-worker checks, upload fencing and Windows SQLite cleanup → PR #29 (Draft).
-28. **PR #31 (this branch)**: close last error-message test regression and stage Ruff's verified safe cleanups without waiving lint → PR #30 (Draft).
+28. [PR #31](https://github.com/MartinezS8/chatgpt-web2api/pull/31): close error-message regression and stage audited Ruff cleanups → PR #30 (Draft).
+29. **PR #32 (this branch)**: restore Pytest fixture registrations removed by F401, resolve remaining Ruff errors, and retest matrix → PR #31 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -354,6 +355,16 @@ See [PR-28 CI test repairs](ORCHESTRATOR_PR28_CI_TEST_FAILURE_REPAIRS.md).
 - [ ] P0: this diagnostic workflow remains branch-editable/untrusted, not protected CI or live permission. No merge or provider actions authorized.
 
 See [PR-29 Ruff debt audit](ORCHESTRATOR_PR29_RUFF_SAFE_FIX_AUDIT.md).
+
+## PR-30 (P0) — Fixture recovery and remaining lint cleanup (Draft PR #32)
+
+- [x] Review exact PR #31 HEAD `e28c368375409d3ff4a955fa59bb8c1d1cc8dbef`: [Actions run 39332816766](https://github.com/MartinezS8/chatgpt-web2api/actions/runs/39332816766) had **988 passed, 64 test setup errors and 20 passing subtests** on six OS/Python combinations, with 53 Ruff errors and no artifact build.
+- [x] Root cause: Ruff F401 'safe' removal deleted `store` imports acting as Pytest fixture registrations across three test modules. Re-export `store as store` explicitly and add cross-module fixture regression test.
+- [x] Rewrite identified 45 E701 and 5 E702 one-line constructs, preserve two F841 side-effect decisions and use Python 3.11 StrEnum for UP042 **while explicitly retaining Enum's previous `__str__` representation**; add JSON/string compatibility regression.
+- [ ] P0: **zero success assumed** until GitHub Actions exact new SHA proves all tests, postflight, Ruff and package build; check compat of `str(TaskState)` on released consumers.
+- [ ] P0: branch-controlled CI remains only untrusted diagnostics, not operator approval or authenticated live ChatGPT provider capability.
+
+See [PR-30 fixture and lint recovery](ORCHESTRATOR_PR30_FIXTURE_LINT_RECOVERY.md).
 
 ## PR-08 (P2) — Windows lifecycle and release
 

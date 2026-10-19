@@ -117,7 +117,7 @@ def _attempt_next(item,uid):
 
 def test_crash_restart_never_reallocates_upload(item):
     uid=reserve(item)["upload_id"]
-    first=nextpart(item,uid)
+    nextpart(item,uid)
     after=UploadIntents(item.db,item.packages)
     assert after.get("task-1")["upload_id"]==uid
     with pytest.raises(ValueError,match="already in flight"):
