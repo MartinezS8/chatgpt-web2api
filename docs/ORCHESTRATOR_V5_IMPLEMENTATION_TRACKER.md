@@ -19,7 +19,8 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 13. [PR #16](https://github.com/MartinezS8/chatgpt-web2api/pull/16): **default-deny legacy Controller.dispatch/poll** unless explicitly called as an offline test, without exposing this testing flag over MCP → PR #15 (Draft).
 14. [PR #17](https://github.com/MartinezS8/chatgpt-web2api/pull/17): durable per-file upload intents and persistent unknown-receipt quarantine (mock-only) → PR #16 (Draft).
 15. [PR #18](https://github.com/MartinezS8/chatgpt-web2api/pull/18): wire existing mock preflight to atomic upload intents, fence replay and seal to current claim → PR #17 (Draft).
-16. **PR #19 (this branch)**: strict read-only GitHub PR/Actions evidence gate, no finalization permissions → PR #18 (Draft).
+16. [PR #19](https://github.com/MartinezS8/chatgpt-web2api/pull/19): strict read-only GitHub PR/Actions evidence gate, no finalization permissions → PR #18 (Draft).
+17. **PR #20 (this branch)**: task/outbox/package-scoped immutable provider observation, with atomic post-GET race check; no state promotion → PR #19 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -191,6 +192,18 @@ See [PR-16 integration details](ORCHESTRATOR_PR16_UPLOAD_INTEGRATION.md).
 - [ ] Full stacked suite, Ruff, Python 3.11/3.12 + Windows, upstream integration tests before merge. Ruff not installed in the local creation environment.
 
 See [PR-17 provider adapter design](ORCHESTRATOR_PR17_GITHUB_READONLY_EVIDENCE.md). This feature does **not** send messages to ChatGPT, select apps, upload files or approve merges.
+
+## PR-18 (P0) — Task-bound GitHub provider observations, Draft PR #20
+
+- [x] New `provider_evidence.py` binds the existing PR #19 read-only provider reader to a specific `task_id`, completed `attempt_id`, sealed package SHA, hashed result reference and claimed repository write scope.
+- [x] Reject missing/rotated claim, changing task/outbox/package while GitHub is queried, wrong resource, unsuccessful CI, moved PR head, stale receipt or substituted dispatch ID.
+- [x] SQLite transactional immutable digest, read-only/unauthorized assurance, no automatic `verified`/`finished` transition, no write-lock release or merge.
+- [x] 46 targeted tests plus a local staged V4/PR04 suite totaling **106 passed + 8 subtests** on Python 3.13; committed adapter source/test Git blob SHAs match locally tested originals. This is **not** a complete current GitHub checkout.
+- [ ] Run full assembled PR stack / upstream suite / Ruff / Windows; real configured provider adapter with approved workflow and operator credentials remains untested.
+- [ ] Restrict allowed workflow triggers and required CI jobs/checks; a green run alone is not user approval or independent reviewer attestation.
+- [ ] Build provider-attested independent review and a **separate trusted finalizer** with fresh current SHA, user consent and atomic state transition; current `ProviderEvidenceLedger.production_finalization_permitted()` always returns False.
+
+See [PR-18 task-bound provider design](ORCHESTRATOR_PR18_PROVIDER_EVIDENCE_BINDING.md). Uploads, callbacks, ChatGPT models/apps and any production transport remain distinct unfinished gates.
 
 ## PR-08 (P2) — Windows lifecycle and release
 
