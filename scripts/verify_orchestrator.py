@@ -125,7 +125,9 @@ def main(argv: list[str] | None = None) -> int:
     for key in ("PYTEST_ADDOPTS", "PYTEST_PLUGINS",
                 "PYTEST_DISABLE_PLUGIN_AUTOLOAD"):
         env.pop(key, None)
-    env["PYTHONPATH"] = str(root / "src")
+    # Sibling test helper modules are intentionally imported as top-level
+    # test_* modules. Both directories are part of the pinned Git checkout.
+    env["PYTHONPATH"] = os.pathsep.join((str(root / "src"), str(root / "tests")))
     # Even if the operator enabled live E2E, this verifier never forwards
     # that opt-in. The marker filter independently excludes account tests.
     env["W2A_E2E_RUN"] = "0"
