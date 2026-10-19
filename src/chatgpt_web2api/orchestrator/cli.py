@@ -13,8 +13,8 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from .resource_registry import ResourceIdentity, ResourceRegistry
 from .store import Store, TaskSpec
-from .resource_registry import ResourceRegistry, ResourceIdentity
 
 
 def build_parser() -> argparse.ArgumentParser:
