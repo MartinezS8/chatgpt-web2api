@@ -22,9 +22,13 @@ _SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 
 def _git(root: Path, *args: str) -> str:
+    # Never let GIT_DIR, GIT_WORK_TREE, GIT_INDEX_FILE or injected Git config
+    # redirect the source identity checks away from the reviewed checkout.
+    clean_git_env = {key: value for key, value in os.environ.items()
+                     if not key.upper().startswith("GIT_")}
     result = subprocess.run(
         ["git", *args], cwd=root, capture_output=True, text=True,
-        timeout=15, check=False,
+        timeout=15, check=False, env=clean_git_env,
     )
     if result.returncode:
         raise ValueError("Git metadata unavailable; no tests were executed")
@@ -118,7 +122,8 @@ def main(argv: list[str] | None = None) -> int:
     env = os.environ.copy()
     # The verifier's meaning must not depend on inherited pytest selectors
     # or additional test modules from a different PYTHONPATH.
-    for key in ("PYTEST_ADDOPTS", "PYTEST_PLUGINS"):
+    for key in ("PYTEST_ADDOPTS", "PYTEST_PLUGINS",
+                "PYTEST_DISABLE_PLUGIN_AUTOLOAD"):
         env.pop(key, None)
     env["PYTHONPATH"] = str(root / "src")
     # Even if the operator enabled live E2E, this verifier never forwards
