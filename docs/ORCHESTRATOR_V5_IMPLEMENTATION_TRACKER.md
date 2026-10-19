@@ -18,7 +18,8 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 12. [PR #15](https://github.com/MartinezS8/chatgpt-web2api/pull/15): **disable untrusted assertion-only finalization**, prove unresolved write scopes stay locked; include latest PR #5 ancestry via a no-content-change merge → PR #14 (Draft).
 13. [PR #16](https://github.com/MartinezS8/chatgpt-web2api/pull/16): **default-deny legacy Controller.dispatch/poll** unless explicitly called as an offline test, without exposing this testing flag over MCP → PR #15 (Draft).
 14. [PR #17](https://github.com/MartinezS8/chatgpt-web2api/pull/17): durable per-file upload intents and persistent unknown-receipt quarantine (mock-only) → PR #16 (Draft).
-15. **PR #18 (this branch)**: wire existing mock preflight to atomic upload intents, fence replay and seal to current claim → PR #17 (Draft).
+15. [PR #18](https://github.com/MartinezS8/chatgpt-web2api/pull/18): wire existing mock preflight to atomic upload intents, fence replay and seal to current claim → PR #17 (Draft).
+16. **PR #19 (this branch)**: strict read-only GitHub PR/Actions evidence gate, no finalization permissions → PR #18 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -177,6 +178,19 @@ See [PR-15 durable upload intents](ORCHESTRATOR_PR15_UPLOAD_INTENTS.md). Keeping
 - [ ] Provider-certified remote receipt/approval and real quota checks; keep `live_send_permitted=False`.
 
 See [PR-16 integration details](ORCHESTRATOR_PR16_UPLOAD_INTEGRATION.md).
+
+## PR-17 (P0) — GitHub provider read-only evidence, Draft PR #19
+
+- [x] Implement `github_readonly_evidence.py` with a restricted GitHub REST GET reader (no redirects; no arbitrary paths; bounded response and timeout; optional explicitly injected token).
+- [x] Verify canonical repository ID, open/unmerged PR head SHA, trusted workflow ID, completed/successful run and matching run SHA.
+- [x] Re-read PR head **after** workflow fetch; reject changed heads instead of treating a stale successful run as current proof.
+- [x] 25 isolated Python 3.13 offline tests + Python compile check; Git blob SHAs for committed source/test match exact local test files.
+- [x] Independently read current fork API metadata through connected GitHub: numeric repository ID **1424862141**, PR #18 baseline repository ID identical, head **77cbef03b739d6682704701040335112f852b83f** at inspection.
+- [ ] Real API execution of the new adapter with valid credentials/allowed workflow; this fork currently has no confirmed successful workflow run and this cannot be claimed as successful CI evidence.
+- [ ] Provider-authorized task/evidence binding, trustworthy reviewer attestation and current-SHA revalidation at final CAS; adapter returns `production_finalization_permitted=False` by design.
+- [ ] Full stacked suite, Ruff, Python 3.11/3.12 + Windows, upstream integration tests before merge. Ruff not installed in the local creation environment.
+
+See [PR-17 provider adapter design](ORCHESTRATOR_PR17_GITHUB_READONLY_EVIDENCE.md). This feature does **not** send messages to ChatGPT, select apps, upload files or approve merges.
 
 ## PR-08 (P2) — Windows lifecycle and release
 
