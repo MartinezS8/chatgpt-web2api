@@ -42,13 +42,30 @@ class RejectByDefaultVerifier:
 
 class Controller:
     def __init__(self, store: Store, transport: Transport,
-                 verifier: Verifier | None = None):
+                 verifier: Verifier | None = None, *, offline_test_mode: bool = False):
+        """Legacy controller: disabled unless a test explicitly opts into mock mode.
+
+        The old dispatcher does not use the sealed TaskPackages/WorkerRegistry/
+        DispatchOutbox pipeline, so it must never be connected to real transports.
+        This is a guard against accidental wiring, not an authentication system:
+        untrusted code running in the same Python process is not a trust boundary.
+        """
         self.store = store
         self.transport = transport
         self.verifier = verifier or RejectByDefaultVerifier()
+        self._offline_test_mode = offline_test_mode
+
+    def _require_offline_test_mode(self) -> None:
+        if not self._offline_test_mode:
+            raise PermissionError(
+                "Legacy Controller transport is disabled outside explicit offline "
+                "tests; use the fenced TaskPackages/WorkerRegistry/DispatchOutbox "
+                "path for any future authorized external transport"
+            )
 
     def dispatch(self, project_id: str, prompt_by_task_id: dict[str, str], max_slots: int = 5):
-        """Dispatch one task. Call in an event loop, not an unbounded busy loop."""
+        """Simulated transport only; live sends require the fenced outbox."""
+        self._require_offline_test_mode()
         task = self.store.claim(project_id, max_slots=max_slots)
         if task is None:
             return None
@@ -98,6 +115,7 @@ class Controller:
         return task_id
 
     def poll(self, project_id: str):
+        self._require_offline_test_mode()
         completed = []
         for task in self.store.all(project_id):
             if task["state"] != TaskState.IN_PROGRESS.value:
