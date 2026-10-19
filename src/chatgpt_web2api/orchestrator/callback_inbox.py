@@ -69,7 +69,7 @@ class CallbackInbox:
             db.execute("""INSERT INTO orchestrator_callback_inbox
                 (attempt_id,worker_id,sequence,kind,payload_sha256,message,created_at)
                 VALUES(?,?,?,?,?,?,?)""", (attempt_id, worker_id, sequence, kind,
-                                             digest, message, time.time()))
+                                             digest, "[redacted]", time.time()))
             return True
 
     def complete_mock(self, *, attempt_id: str, worker_id: str,

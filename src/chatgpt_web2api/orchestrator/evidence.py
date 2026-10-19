@@ -47,12 +47,20 @@ class EvidenceLedger:
         task = self.store.get(task_id)
         if task is None or task["role"] != "implement":
             raise ValueError("evidence must reference an implementation task")
+        # PR-02B resource identity is the only valid lock namespace.
+        # An unrelated repository must not satisfy this task's evidence.
+        repo_scope = f"github:repo/{int(repository_id)}"
+        declared_scopes = json.loads(task["write_scopes"])
+        if not any(scope == repo_scope or scope.startswith(repo_scope + "/")
+                   for scope in declared_scopes):
+            raise ValueError("GitHub evidence repo not in declared task scope")
         pr = probe.inspect_pr(repository_id, pr_number)
         run = probe.inspect_run(repository_id, run_id)
         if (pr.get("repository_id") != repository_id or pr.get("number") != pr_number
                 or pr.get("head_sha") != expected_head_sha or pr.get("state") != "open"):
             raise ValueError("PR head changed or repository/PR identity mismatch")
         if (run.get("repository_id") != repository_id or run.get("head_sha") != expected_head_sha
+                or run.get("status") != "completed"
                 or run.get("conclusion") != "success" or run.get("id") != run_id):
             raise ValueError("CI is missing, stale, or not green for exact head SHA")
         payload = {"task_id": task_id, "repository_id": repository_id,
