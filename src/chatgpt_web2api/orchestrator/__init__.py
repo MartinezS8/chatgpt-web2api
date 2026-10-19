@@ -14,10 +14,11 @@ from .scheduler import Scheduler
 from .store import Store, TaskSpec, TaskState
 from .supervisor import Supervisor
 from .task_packages import TaskPackages
+from .upload_preflight import UploadPreflight
 from .worker_registry import WorkerRegistry, WorkerSpec
 
 __all__ = [
-    "CallbackInbox", "EvidenceLedger", "GitHubEvidenceProbe", "Planner", "ReviewLedger",
+    "UploadPreflight", "CallbackInbox", "EvidenceLedger", "GitHubEvidenceProbe", "Planner", "ReviewLedger",
     "Controller", "DispatchOutbox", "ResourceIdentity", "ResourceRegistry",
     "Store", "TaskPackages", "TaskSpec", "TaskState", "Transport",
     "TransportResult", "Verifier", "Scheduler", "Supervisor", "WorkerRegistry", "WorkerSpec",
