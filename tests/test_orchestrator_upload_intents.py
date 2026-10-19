@@ -167,3 +167,42 @@ def test_invalid_manifest_fail_closed(item):
     with pytest.raises(ValueError,match="duplicate attachment"):
         reserve(item)
     assert item.gate.get("task-1") is None
+
+class MockUploader:
+    def __init__(self, *, fail=False):
+        self.fail=fail
+        self.calls=[]
+
+    def upload(self, att, path):
+        self.calls.append((att["sha256"],path))
+        if self.fail:
+            raise TimeoutError("acknowledgment lost after potential remote commit")
+        return {"remote_id": "fake:"+att["sha256"], "sha256":att["sha256"],
+                "media_type":att["media_type"], "size":att["size"]}
+
+
+def test_perform_mock_uploads_is_sequential_and_once(item):
+    adapter=MockUploader()
+    replies=item.gate.perform_mock(task_id="task-1",worker_id="worker-1",
+                                   claim_token=item.token,uploader=adapter)
+    assert len(replies)==2
+    assert len(adapter.calls)==2
+    another=MockUploader()
+    with pytest.raises(ValueError,match="no re-upload"):
+        item.gate.perform_mock(task_id="task-1",worker_id="worker-1",
+                               claim_token=item.token,uploader=another)
+    assert another.calls==[]
+
+
+def test_perform_mock_timeout_quarantines_and_never_resends(item):
+    first=MockUploader(fail=True)
+    with pytest.raises(TimeoutError):
+        item.gate.perform_mock(task_id="task-1",worker_id="worker-1",
+                               claim_token=item.token,uploader=first)
+    assert len(first.calls)==1
+    assert item.gate.get("task-1")["status"]=="unknown"
+    next_attempt=MockUploader()
+    with pytest.raises(ValueError,match="no re-upload"):
+        item.gate.perform_mock(task_id="task-1",worker_id="worker-1",
+                               claim_token=item.token,uploader=next_attempt)
+    assert next_attempt.calls==[]
