@@ -27,7 +27,8 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 21. [PR #24](https://github.com/MartinezS8/chatgpt-web2api/pull/24): signed GitHub PR-HEAD commit metadata plus active mock-worker/claim attribution, read-only and not an authenticated remote session → PR #23 (Draft).
 22. [PR #25](https://github.com/MartinezS8/chatgpt-web2api/pull/25): operator-pinned workflow file provenance, with exact commit blob SHA, no merge permission → PR #24 (Draft).
 23. [PR #26](https://github.com/MartinezS8/chatgpt-web2api/pull/26): persist pinned CI workflow blob in fenced task evidence and transitive review digests; preserve legacy read-only receipts → PR #25 (Draft).
-24. **PR #27 (this branch)**: verify local tests against exact clean Git HEAD, fail closed on mismatch, distinguish smoke from complete local verification → PR #26 (Draft).
+24. [PR #27](https://github.com/MartinezS8/chatgpt-web2api/pull/27): verify local tests against exact clean Git HEAD, fail closed on mismatch, distinguish smoke from complete local verification → PR #26 (Draft).
+25. **PR #28 (this branch)**: close post-test checkout TOCTOU and inherited Git/pytest environment override paths → PR #27 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -301,6 +302,18 @@ See [PR-24 pinned CI evidence ledger](ORCHESTRATOR_PR24_TASK_CI_WORKFLOW_PIN_LED
 - [ ] P1: only authorized supportable transport; no ChatGPT Plus automated web sends, model/plugin selection or file uploads enabled.
 
 See [PR-25 reproducible verification](ORCHESTRATOR_PR25_REPRODUCIBLE_VERIFICATION.md). `local_gate_complete` is a **local smoke/integration assertion**, never a signed CI or user authorization.
+
+## PR-26 (P0) — Postflight Git identity and pytest environment fencing (Draft PR #28)
+
+- [x] Review finding: prior strict test gate only checked Git HEAD/worktree before execution. A process could change tested files or move HEAD and still receive a green local-gate receipt.
+- [x] Re-run Git root, expected HEAD and strict tracked/untracked-clean checks **after** all checks. Postflight failure overrides subprocess zero exit codes with `ok=false`, `local_gate_complete=false`.
+- [x] Remove inherited pytest selectors/plugins and unrelated `PYTHONPATH` from test subprocess environment; clear inherited `GIT_*` in Git identity checks. Use no pytest cache provider to minimize repository writes.
+- [x] New tests cover source mutation, moved HEAD, Git env override, pytest injection and failed Git postflight, extending local unit suite to twelve test functions. **Not executed in exact stacked checkout in this session.**
+- [ ] P0: exact checkout full suite and Ruff, Python 3.11/3.12 × Linux/Windows/macOS; full offline local evidence still unverified.
+- [ ] P0: implement eligible but owner-trusted CI branch workflow without trusting agent-editable YAML, mutable action tags or unreviewed runner policy.
+- [ ] P0: authenticated worker identity, reviewed current SHA and human-approved transactional finalizer still blocked. No live ChatGPT Plus web automation, plugin control or uploads.
+
+See [PR-26 verifier postflight and environment design](ORCHESTRATOR_PR26_VERIFIER_TOCTOU_ENV_FENCING.md).
 
 ## PR-08 (P2) — Windows lifecycle and release
 
