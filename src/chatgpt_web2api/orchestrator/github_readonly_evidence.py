@@ -14,6 +14,8 @@ from typing import Callable, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
+from .workflow_source_pin import WorkflowSourcePin
+
 _SHA = re.compile(r"[0-9a-f]{40}\Z")
 _SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}\Z")
 _JOB_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:/() -]{0,127}\Z")
@@ -47,7 +49,13 @@ class GitHubReadOnlyHTTP:
         self._opener = build_opener(_NeverRedirect())
 
     def __call__(self, path: str) -> dict:
-        if not re.fullmatch(r"/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/pulls/[0-9]+|/actions/runs/[0-9]+(?:/jobs\?filter=latest&per_page=100)?)?", path):
+        allowed_default = re.fullmatch(
+            r"/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/pulls/[0-9]+|/actions/runs/[0-9]+(?:/jobs\?filter=latest&per_page=100)?)?", path)
+        allowed_workflow = re.fullmatch(
+            r"/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/workflows/[0-9]+", path)
+        allowed_pinned_content = re.fullmatch(
+            r"/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/contents/\.github/workflows/[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\.(?:yml|yaml)\?ref=[0-9a-f]{40}", path)
+        if not (allowed_default or allowed_workflow or allowed_pinned_content):
             raise ValueError("GitHub evidence path is not an allowed read-only endpoint")
         headers = {
             "Accept": "application/vnd.github+json",
@@ -91,6 +99,7 @@ class ReadOnlyPRRunReceipt:
     event: str
     head_branch: str
     successful_jobs: tuple[str, ...]
+    workflow_blob_sha: str | None = None
     assurance: str = "provider_read_only_unreviewed"
     live_send_permitted: bool = False
     production_finalization_permitted: bool = False
@@ -108,7 +117,8 @@ class GitHubReadOnlyEvidence:
                  trusted_workflow_ids: frozenset[int], reader: JsonReader,
                  required_job_names: frozenset[str],
                  trusted_events: frozenset[str] = frozenset({"push"}),
-                 now: Callable[[], float] = time.time):
+                 now: Callable[[], float] = time.time,
+                 workflow_source_pin: WorkflowSourcePin | None = None):
         if not isinstance(owner, str) or not _SLUG.fullmatch(owner) or owner in (".", ".."):
             raise ValueError("invalid GitHub owner")
         if not isinstance(repo, str) or not _SLUG.fullmatch(repo) or repo in (".", ".."):
@@ -129,6 +139,15 @@ class GitHubReadOnlyEvidence:
                     not isinstance(name, str) or not _JOB_NAME.fullmatch(name)
                     for name in required_job_names)):
             raise ValueError("explicit required CI job names are mandatory")
+        if workflow_source_pin is not None and (
+                not isinstance(workflow_source_pin, WorkflowSourcePin)
+                or workflow_source_pin.repository_id != repository_id
+                or workflow_source_pin.owner.casefold() != owner.casefold()
+                or workflow_source_pin.repo.casefold() != repo.casefold()
+                or workflow_source_pin.workflow_id not in trusted_workflow_ids
+                or workflow_source_pin.reader is not reader):
+            raise ValueError("trusted workflow pin must match CI reader and repository")
+        self.workflow_source_pin = workflow_source_pin
         self.required_job_names = required_job_names
         self.trusted_events = trusted_events
         self.owner, self.repo = owner, repo
@@ -216,6 +235,13 @@ class GitHubReadOnlyEvidence:
             verified_jobs[name] = True
         if not self.required_job_names.issubset(verified_jobs):
             raise ValueError("required GitHub CI jobs are missing")
+        # A green CI run is not trusted workflow provenance: pin the YAML
+        # on the PR-head commit against independently configured bytes.
+        workflow_blob_sha = None
+        if self.workflow_source_pin is not None:
+            pinned = self.workflow_source_pin.inspect(
+                expected_head_sha=expected_head_sha, run=run)
+            workflow_blob_sha = pinned.workflow_blob_sha
         # Reduce the time-of-check/time-of-use window: an updated PR head
         # during the CI fetch must fail, not produce an apparently valid proof.
         final_branch = self._check_pr(self.reader(path), pr_number=pr_number,
@@ -234,4 +260,5 @@ class GitHubReadOnlyEvidence:
             event=run["event"],
             head_branch=branch,
             successful_jobs=tuple(sorted(verified_jobs)),
+            workflow_blob_sha=workflow_blob_sha,
         )

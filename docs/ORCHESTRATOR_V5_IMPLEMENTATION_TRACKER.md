@@ -24,7 +24,8 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 18. [PR #21](https://github.com/MartinezS8/chatgpt-web2api/pull/21): read-only GitHub evidence restricted to trusted push events, same-repository head SHA and explicitly required successful CI jobs → PR #20 (Draft).
 19. [PR #22](https://github.com/MartinezS8/chatgpt-web2api/pull/22): independent read-only GitHub reviewer permission/identity and SHA verification, no task finalization → PR #21 (Draft).
 20. [PR #23](https://github.com/MartinezS8/chatgpt-web2api/pull/23): bind read-only GitHub reviewer observations to task/dispatch/CI snapshot/package/claim, preserving all locks → PR #22 (Draft).
-21. **PR #24 (this branch)**: signed GitHub PR-HEAD commit metadata plus active mock-worker/claim attribution, read-only and not an authenticated remote session → PR #23 (Draft).
+21. [PR #24](https://github.com/MartinezS8/chatgpt-web2api/pull/24): signed GitHub PR-HEAD commit metadata plus active mock-worker/claim attribution, read-only and not an authenticated remote session → PR #23 (Draft).
+22. **PR #25 (this branch)**: operator-pinned workflow file provenance, with exact commit blob SHA, no merge permission → PR #24 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -260,6 +261,20 @@ See [PR-21 task-bound review evidence design](ORCHESTRATOR_PR21_TASK_BOUND_REVIE
 - [ ] Real attachments, plugins/apps, model High and live callback/session transport remain separate incomplete integrations.
 
 See [PR-22 commit and worker correlation design](ORCHESTRATOR_PR22_IMPLEMENTER_COMMIT_CORRELATION.md). `production_finalization_permitted=False` is invariant.
+
+## PR-23 (P0) — GitHub CI workflow source pin, Draft PR #25
+
+- [x] New workflow-source pin checks run repository/workflow/HEAD, active workflow registration, and the HEAD-specific YAML Git blob SHA against independent controller policy.
+- [x] Restricted GET-only endpoints for workflow metadata and exact SHA-pinned workflow file content; recompute Git SHA-1 from decoded source bytes; no arbitrary URL, redirects or writable actions.
+- [x] Existing CI reader optionally requires this configured pin, and receipt marks source SHA only when checked. Legacy unpinned receipts report workflow_blob_sha=None; neither kind grants finalization.
+- [x] 35 local unit cases passed Python 3.13/Linux for the standalone pin module. Five extra adapter integration tests committed but not run on exact cumulative source.
+- [ ] P0: full stacked PR tests/Ruff/Windows and Python 3.11/3.12; do not claim green CI. Current fork has zero workflow runs.
+- [ ] P0: branch protection not verified (GitHub protection endpoint 403, rulesets empty). Approved workflow pin must come from trusted owner policy, not an agent-editable branch.
+- [ ] P0: mutable actions, external downloads and tested checkout code must be audited; workflow YAML equality alone is not complete supply-chain attestation.
+- [ ] P0: persist pin in task CI evidence digest and recheck source, current SHA, review permission and explicit user consent at trusted finalizer action boundary.
+- [ ] P1: live supported transport, file uploads, callbacks, app selection and High model verification remain unimplemented.
+
+Details: [PR-23 workflow provenance design](ORCHESTRATOR_PR23_WORKFLOW_SOURCE_PIN.md).
 
 ## PR-08 (P2) — Windows lifecycle and release
 

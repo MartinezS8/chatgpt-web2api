@@ -21,6 +21,7 @@ from .task_packages import TaskPackages
 from .upload_intents import UploadIntents
 from .upload_preflight import UploadPreflight
 from .worker_registry import WorkerRegistry, WorkerSpec
+from .workflow_source_pin import WorkflowSourcePin, WorkflowSourceObservation
 
 __all__ = [
     "UploadPreflight", "CallbackInbox", "EvidenceLedger", "GitHubEvidenceProbe", "Planner", "ReviewLedger",
@@ -28,4 +29,5 @@ __all__ = [
     "ReviewObservation", "ResourceIdentity", "ResourceRegistry",
     "Store", "TaskPackages", "TaskSpec", "TaskState", "Transport",
     "TransportResult", "Verifier", "Scheduler", "Supervisor", "WorkerRegistry", "WorkerSpec", "UploadIntents",
+    "WorkflowSourcePin", "WorkflowSourceObservation",
 ]
