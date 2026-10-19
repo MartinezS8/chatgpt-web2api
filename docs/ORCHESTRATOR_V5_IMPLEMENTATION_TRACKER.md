@@ -23,7 +23,8 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 17. [PR #20](https://github.com/MartinezS8/chatgpt-web2api/pull/20): task/outbox/package-scoped immutable provider observation, with atomic post-GET race check; no state promotion → PR #19 (Draft).
 18. [PR #21](https://github.com/MartinezS8/chatgpt-web2api/pull/21): read-only GitHub evidence restricted to trusted push events, same-repository head SHA and explicitly required successful CI jobs → PR #20 (Draft).
 19. [PR #22](https://github.com/MartinezS8/chatgpt-web2api/pull/22): independent read-only GitHub reviewer permission/identity and SHA verification, no task finalization → PR #21 (Draft).
-20. **PR #23 (this branch)**: bind read-only GitHub reviewer observations to task/dispatch/CI snapshot/package/claim, preserving all locks → PR #22 (Draft).
+20. [PR #23](https://github.com/MartinezS8/chatgpt-web2api/pull/23): bind read-only GitHub reviewer observations to task/dispatch/CI snapshot/package/claim, preserving all locks → PR #22 (Draft).
+21. **PR #24 (this branch)**: signed GitHub PR-HEAD commit metadata plus active mock-worker/claim attribution, read-only and not an authenticated remote session → PR #23 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -247,6 +248,18 @@ See [PR-20 technical review](ORCHESTRATOR_PR20_READONLY_REVIEW_VERIFICATION.md).
 - [ ] Real ChatGPT Plus plugin selection, file upload, GPT-6 High proof and live callback/session transport remain separate unfinished gates.
 
 See [PR-21 task-bound review evidence design](ORCHESTRATOR_PR21_TASK_BOUND_REVIEWS.md).
+
+## PR-22 (P0) — Signed GitHub commit and local mock-worker correlation (PR #24)
+
+- [x] Constrained GET-only GitHub commit endpoint; strict same-repo open PR and HEAD before/after; require trusted numeric author AND committer GitHub IDs and GitHub-verified valid commit signature.
+- [x] Durable mock-worker attribution ledger bound to the exact task, completed attempt, fresh CI and review digests, sealed package, current claim token hash and active worker assignment; recheck all local state in a write transaction after GitHub reads.
+- [x] Scheduler assignment version is from reservation, while task state transitions advance task version: allow earlier positive assignment version (not zero/future), retain strong attempt/claim/package matching and reject reassignment.
+- [x] **129 staged offline tests** including 31 new attribution cases and 98 existing CI/review/provider tests; Python 3.13/Linux; source/test files match locally tested Git blobs. No complete assembled GitHub checkout, Windows CI or Ruff.
+- [ ] **Provider-authenticated worker-to-GitHub actor linkage remains unavailable.** The local worker is `mock` and a protected operator mapping is not proof of a real remote Codex/ChatGPT session. Signed commit metadata alone cannot authenticate the real worker. Never enable production finalization from this observation.
+- [ ] Protected CI workflow version, verified provider reviewer identity on current SHA, explicit user consent, fresh finalizer-bound CAS and single authorized dispatcher remain P0 release gates.
+- [ ] Real attachments, plugins/apps, model High and live callback/session transport remain separate incomplete integrations.
+
+See [PR-22 commit and worker correlation design](ORCHESTRATOR_PR22_IMPLEMENTER_COMMIT_CORRELATION.md). `production_finalization_permitted=False` is invariant.
 
 ## PR-08 (P2) — Windows lifecycle and release
 
