@@ -22,7 +22,8 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 16. [PR #19](https://github.com/MartinezS8/chatgpt-web2api/pull/19): strict read-only GitHub PR/Actions evidence gate, no finalization permissions → PR #18 (Draft).
 17. [PR #20](https://github.com/MartinezS8/chatgpt-web2api/pull/20): task/outbox/package-scoped immutable provider observation, with atomic post-GET race check; no state promotion → PR #19 (Draft).
 18. [PR #21](https://github.com/MartinezS8/chatgpt-web2api/pull/21): read-only GitHub evidence restricted to trusted push events, same-repository head SHA and explicitly required successful CI jobs → PR #20 (Draft).
-19. **PR #22 (this branch)**: independent read-only GitHub reviewer permission/identity and SHA verification, no task finalization → PR #21 (Draft).
+19. [PR #22](https://github.com/MartinezS8/chatgpt-web2api/pull/22): independent read-only GitHub reviewer permission/identity and SHA verification, no task finalization → PR #21 (Draft).
+20. **PR #23 (this branch)**: bind read-only GitHub reviewer observations to task/dispatch/CI snapshot/package/claim, preserving all locks → PR #22 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -233,6 +234,19 @@ See [PR-19 GitHub CI hardening](ORCHESTRATOR_PR19_CI_EVENT_AND_JOBS_POLICY.md). 
 - [ ] No live ChatGPT Plus plugin/app, file upload, verified GPT-6 High selection or agent transport is implied.
 
 See [PR-20 technical review](ORCHESTRATOR_PR20_READONLY_REVIEW_VERIFICATION.md). As requested, GitHub Issues are not required; Codex can consume this Markdown tracker directly.
+
+## PR-21 (P0) — Task-bound immutable reviewer observations (PR #23)
+
+- [x] New `task_review_evidence.py` records immutable review receipt on the same SQLite authority as tasks/outbox/CI observations, keyed by a specific task and completed attempt, canonical repository ID, current PR SHA, sealed package digest, trusted numeric implementer and GitHub reviewer/review IDs.
+- [x] Existing CI observation digest and freshness checked against current task/attempt claim BEFORE remote review; after provider reads a single `BEGIN IMMEDIATE` transaction rechecks task, package, claim and CI proof before recording.
+- [x] Reject unrelated attempts, stale/altered CI proof, revoked reviewer permission, duplicate/replayed review, changed PR head, changed task/claim during network reads. Retain existing task state and resource locks.
+- [x] **98 local staged offline tests** (24 new task-review cases + 74 existing CI/review adapter tests), Linux/Python 3.13. New code/test/document SHA verified exactly against staged files; full cumulative repo suite/Ruff/Windows CI not run.
+- [ ] Authenticate the implementer GitHub identity independently from operator configuration and bind it to the real worker, code author and authorization scope.
+- [ ] Verify workflow provenance from protected, trusted CI source and recheck PR SHA/reviewer permissions **at the future finalizer decision**, not from previously saved snapshots.
+- [ ] Provider-authorized task finalizer, human consent and single authorized dispatcher remain unimplemented; `production_finalization_permitted=False` by design.
+- [ ] Real ChatGPT Plus plugin selection, file upload, GPT-6 High proof and live callback/session transport remain separate unfinished gates.
+
+See [PR-21 task-bound review evidence design](ORCHESTRATOR_PR21_TASK_BOUND_REVIEWS.md).
 
 ## PR-08 (P2) — Windows lifecycle and release
 
