@@ -71,6 +71,42 @@ class UploadPreflight:
             if (assignment is None or assignment["worker_id"] != worker_id or not assignment["enabled"]
                     or assignment["transport"] != "mock"):
                 raise ValueError("task not assigned to this enabled mock worker")
+        # Repeated preflight for the same sealed package is a read-only
+        # idempotency check. Never re-upload attachments on an ordinary retry.
+        # This is a mock-only gate; concurrent/unknown live upload receipts
+        # will additionally need a durable inflight lease in PR-06B.
+        capability_digest = self._hash(caps)
+        with self.store._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            previous = db.execute(
+                "SELECT * FROM orchestrator_mock_upload_preflight WHERE task_id=?",
+                (task_id,),
+            ).fetchone()
+            if previous:
+                expected = {
+                    "worker_id": worker_id,
+                    "package_sha256": package["package_sha256"],
+                    "capability_digest": capability_digest,
+                    "model": model,
+                    "effort": effort,
+                    "apps": list(required_apps),
+                }
+                recorded = {
+                    "worker_id": previous["worker_id"],
+                    "package_sha256": previous["package_sha256"],
+                    "capability_digest": previous["capability_digest"],
+                    "model": previous["model"],
+                    "effort": previous["effort"],
+                    "apps": json.loads(previous["apps_json"]),
+                }
+                if recorded != expected:
+                    raise ValueError("sealed preflight does not match current inputs")
+                return {
+                    "created": False, "mock_ready": True,
+                    "live_send_permitted": False,
+                    "attachment_count": len(json.loads(previous["receipts_json"])),
+                    "assurance": "offline_mock_only",
+                }
         receipts=[]
         seen=set()
         for att in package["attachments"]:
@@ -85,7 +121,7 @@ class UploadPreflight:
             seen.add(ack["remote_id"])
             receipts.append({"name":att["name"],"sha256":att["sha256"],
                              "remote_id":ack["remote_id"],"size":att["size"]})
-        cap_digest=self._hash(caps)
+        cap_digest=capability_digest
         snapshot={"worker_id":worker_id,"package_sha256":package["package_sha256"],
                   "receipts":receipts,"capability_digest":cap_digest,"model":model,
                   "effort":effort,"apps":list(required_apps)}

@@ -71,6 +71,26 @@ def test_missing_database_cannot_be_created_by_read_only_observer(tmp_path):
     assert not p.exists()
 
 
+
+def test_read_only_connections_are_closed_after_each_query(db, monkeypatch):
+    closed = []
+    original_connect = sqlite3.connect
+
+    class TrackedConnection(sqlite3.Connection):
+        def close(self):
+            closed.append(True)
+            return super().close()
+
+    def tracked_connect(*args, **kwargs):
+        return original_connect(*args, factory=TrackedConnection, **kwargs)
+
+    monkeypatch.setattr(sqlite3, "connect", tracked_connect)
+    observer = Observer(db)
+    assert observer.status("p")["tasks"] == 1
+    assert observer.events()["events"]
+    assert len(closed) == 2
+
+
 def test_invalid_pagination(db):
     o=Observer(db)
     with pytest.raises(ValueError):o.events(after=-1)

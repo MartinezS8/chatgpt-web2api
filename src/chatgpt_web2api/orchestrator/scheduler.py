@@ -99,10 +99,24 @@ class Scheduler:
                 if update.rowcount != 1:
                     raise RuntimeError("claim CAS unexpectedly failed")
                 row = self.store.get_row(db,task["task_id"])
-                db.execute("""INSERT INTO orchestrator_worker_assignments
+                # An expired *pre-send* claim is requeued by Store.recover().
+                # The historical assignment is then 'released' above.  The
+                # task_id is the assignment's PRIMARY KEY, so a fresh INSERT
+                # alone would fail on legitimate recovery.  Only replace a
+                # previously released assignment: never steal an active one.
+                assigned = db.execute("""INSERT INTO orchestrator_worker_assignments
                      (task_id,worker_id,claim_version,state,created_at)
-                     VALUES (?,?,?,'active',?)""",
+                     VALUES (?,?,?,'active',?)
+                     ON CONFLICT(task_id) DO UPDATE SET
+                       worker_id=excluded.worker_id,
+                       claim_version=excluded.claim_version,
+                       state='active',
+                       created_at=excluded.created_at,
+                       released_at=NULL
+                     WHERE orchestrator_worker_assignments.state='released'""",
                            (task["task_id"],selected["worker_id"],row["claim_version"],now))
+                if assigned.rowcount != 1:
+                    raise RuntimeError("active worker assignment could not be fenced")
                 self.store._event(db,task["task_id"],"worker.assigned",selected["worker_id"])
                 return {"task":row,"worker_id":selected["worker_id"],
                         "session_key":selected["session_key"],"remote_send_permitted":False}

@@ -106,6 +106,18 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 
 **Acceptance:** capability mismatch yields 0 sends; controlled opt-in one-worker test supports safe recovery.
 
+## Independent stacked integration review (2026-10-19)
+
+- [x] Review PR #5 worker pre-send reassignment; safe released-assignment upsert + regression in PR #5.
+- [x] Identify and close duplicate PR #9; PR #6's callback/review implementation remains canonical.
+- [x] Add follow-on PR-10 regression patches: sequential mock upload idempotency, deterministic Observer SQLite close, carry forward PR #5 scheduler fix on latest tip.
+- [ ] Reconcile PR #6–#8 ancestry with latest PR #5 fix before integrated testing; current child branches were created before the fix.
+- [ ] Provider-authenticated GitHub/CI/reviewer evidence and disabled legacy direct finalize before live use.
+- [ ] Durable concurrent upload intent and unknown-remote-receipt reconciliation before any live upload transport.
+- [ ] Execute full lint, integrated tests, Windows and upstream suite on exact final SHA.
+
+See [integration review](ORCHESTRATOR_REVIEW_PR08_PR10.md). Issues and GitHub Actions configuration can be handled by Codex separately, as requested.
+
 ## PR-08 (P2) — Windows lifecycle and release
 
 - [ ] Per-user Windows install/daemon, protected credential storage, no shared Chrome profile collision.

@@ -6,6 +6,7 @@ expose prompt bodies, claim tokens, or authorize remote writes.
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 
@@ -18,7 +19,9 @@ class Observer:
     def _read(self, query: str, params: tuple = (), *, limit: int = 100) -> list[dict]:
         """Only module-authored SELECT statements; no caller-provided SQL."""
         uri = self.path.as_uri() + "?mode=ro"
-        with sqlite3.connect(uri, uri=True, timeout=5.0) as db:
+        # sqlite3.Connection context manager commits/rolls back but does NOT
+        # close the connection. The observer is polled repeatedly; close it.
+        with closing(sqlite3.connect(uri, uri=True, timeout=5.0)) as db:
             db.row_factory = sqlite3.Row
             rows = db.execute(query, (*params, limit)).fetchall()
             return [dict(r) for r in rows]
