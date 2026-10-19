@@ -55,7 +55,10 @@ class DispatchOutbox:
                 raise ValueError("unknown task")
             existing=db.execute("SELECT * FROM orchestrator_dispatch_attempts WHERE task_id=?",(task_id,)).fetchone()
             if existing:
-                # Read is idempotent but NEVER grants a second right to call external send.
+                # Introspection is fenced too; an incorrect token must never
+                # reveal another dispatch attempt or grant another send.
+                if existing["claim_token_hash"] != hashlib.sha256(claim_token.encode()).hexdigest():
+                    raise ValueError("attempt owned by a different claim")
                 if existing["package_sha256"] != package["package_sha256"]:
                     raise ValueError("outbox attempt package mismatch")
                 return {"attempt_id":existing["attempt_id"],"status":existing["status"],"new_send_permit":False}
