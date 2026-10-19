@@ -34,14 +34,22 @@ class FakeReader:
             self.pr_views += 1
             head = "b" * 40 if self.move_head and self.pr_views == 2 else SHA
             return {"number": 7, "state": "open", "merged": False,
-                    "base": {"repo": {"id": 137}}, "head": {"sha": head}}
+                    "base": {"repo": {"id": 137}},
+                    "head": {"sha": head, "ref": "codex/fix", "repo": {"id": 137}}}
+        if path.endswith("/jobs?filter=latest&per_page=100"):
+            job_run_id = int(path.split("/actions/runs/")[1].split("/")[0])
+            return {"total_count": 2, "jobs": [
+                {"name": name, "run_id": job_run_id, "head_sha": SHA,
+                 "status": "completed", "conclusion": "success"}
+                for name in ("lint", "unit")]}
         if path.startswith("/repos/Acme/repo/actions/runs/"):
             if self.mutation is not None:
                 self.mutation(self.store)
             return {"id": int(path.rsplit("/", 1)[1]), "repository": {"id": 137},
                     "workflow_id": 51, "head_sha": SHA, "status": "completed",
                     "conclusion": "failure" if self.fail_run else "success",
-                    "run_attempt": 1}
+                    "run_attempt": 1, "event": "push", "head_branch": "codex/fix",
+                    "head_repository": {"id": 137}}
         raise AssertionError("unexpected provider path")
 
 
@@ -75,6 +83,7 @@ def store(tmp_path: Path) -> Store:
 def gate(reader):
     return GitHubReadOnlyEvidence(owner="Acme", repo="repo", repository_id=137,
                                   trusted_workflow_ids=frozenset({51}),
+                                  required_job_names=frozenset({"lint", "unit"}),
                                   reader=reader, now=lambda: STAMP)
 
 
@@ -98,7 +107,9 @@ def test_records_exact_fenced_task_pr_ci_without_finishing_or_releasing_lock(sto
     assert not ledger.production_finalization_permitted("impl")
     assert any(e["kind"] == "evidence.provider_observed" for e in store.events("impl"))
     assert reader.calls == ["/repos/Acme/repo", "/repos/Acme/repo/pulls/7",
-                             "/repos/Acme/repo/actions/runs/99", "/repos/Acme/repo/pulls/7"]
+                             "/repos/Acme/repo/actions/runs/99",
+                            "/repos/Acme/repo/actions/runs/99/jobs?filter=latest&per_page=100",
+                            "/repos/Acme/repo/pulls/7"]
 
 
 def test_same_evidence_is_immutable_and_idempotent(store):
