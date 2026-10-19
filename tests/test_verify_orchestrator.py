@@ -183,6 +183,7 @@ def test_inherited_pytest_selectors_and_external_pythonpath_removed(
     root, sha = checkout
     monkeypatch.setenv("PYTEST_ADDOPTS", "--ignore=tests --maxfail=1")
     monkeypatch.setenv("PYTEST_PLUGINS", "untrusted_extra_test_plugin")
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     monkeypatch.setenv("PYTHONPATH", "/tmp/untrusted")
     calls = fake_checks(monkeypatch)
     assert checker.main(["--repo", str(root), "--strict", "--full",
@@ -194,6 +195,7 @@ def test_inherited_pytest_selectors_and_external_pythonpath_removed(
         child = kwargs["env"]
         assert "PYTEST_ADDOPTS" not in child
         assert "PYTEST_PLUGINS" not in child
+        assert "PYTEST_DISABLE_PLUGIN_AUTOLOAD" not in child
         assert child["PYTHONPATH"] == str(root / "src")
     assert "-p" in calls[1][0] and "no:cacheprovider" in calls[1][0]
 
@@ -220,3 +222,19 @@ def test_unexpected_git_error_during_postflight_fails_closed(
     assert len(calls) == 3
     assert not result["postflight_ok"] and not result["local_gate_complete"]
     assert "postflight_error" in result and not result["ok"]
+
+
+def test_injected_git_dir_and_worktree_do_not_redirect_identity(
+    checkout, monkeypatch, capsys,
+):
+    root, sha = checkout
+    monkeypatch.setenv("GIT_DIR", str(root / "does-not-exist.git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(root / "src"))
+    monkeypatch.setenv("GIT_INDEX_FILE", str(root / "injected-index"))
+    calls = fake_checks(monkeypatch)
+    assert checker.main(["--repo", str(root), "--strict", "--full",
+                         "--expected-sha", sha]) == 0
+    result = output(capsys)
+    assert result["head_sha_at_end"] == sha
+    assert result["postflight_ok"] and result["local_gate_complete"]
+    assert len(calls) == 3
