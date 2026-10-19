@@ -125,6 +125,13 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 
 See [integration review](ORCHESTRATOR_REVIEW_PR08_PR10.md). Issues and GitHub Actions configuration can be handled by Codex separately, as requested.
 
+### Follow-up independent review identity gate (PR #14)
+
+- [x] [Draft PR #14](https://github.com/MartinezS8/chatgpt-web2api/pull/14) additionally requires same-account, same-project and different-session reviewer/implementer workers, with both roles and enabled state checked.
+- [x] Two negative regression cases committed for cross-account, project mismatch, shared session and disabled implementer.
+- [ ] Run full stacked PR #1→#14 suite, Ruff and Python 3.11/3.12 Windows matrix. **No fresh CI run is claimed by PR #14.**
+- [ ] Actual provider-signed review provenance, GitHub CI/PR HEAD revalidation, removal of legacy finalize bypass and authorized transport preflight remain mandatory.
+
 ## PR-08 (P2) — Windows lifecycle and release
 
 - [ ] Per-user Windows install/daemon, protected credential storage, no shared Chrome profile collision.

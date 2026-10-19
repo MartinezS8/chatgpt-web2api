@@ -43,11 +43,15 @@ def db(tmp_path):
                           write_scopes=("github:repo/123",)))
     store.create(TaskSpec("review-1", "p", "review", "review work", review_of="build"))
     with store._connect() as d:
-        d.executescript("""CREATE TABLE orchestrator_workers(worker_id TEXT PRIMARY KEY, role TEXT, transport TEXT, enabled INTEGER);
+        d.executescript("""CREATE TABLE orchestrator_workers(
+                worker_id TEXT PRIMARY KEY, account_id TEXT NOT NULL,
+                project_id TEXT NOT NULL, session_key TEXT NOT NULL,
+                role TEXT NOT NULL, transport TEXT NOT NULL,
+                enabled INTEGER NOT NULL);
            CREATE TABLE orchestrator_worker_assignments(task_id TEXT,worker_id TEXT,state TEXT);
         """)
-        d.execute("INSERT INTO orchestrator_workers VALUES ('dev','implement','mock',1)")
-        d.execute("INSERT INTO orchestrator_workers VALUES ('qa','review','mock',1)")
+        d.execute("INSERT INTO orchestrator_workers VALUES ('dev','personal','p','fake:dev','implement','mock',1)")
+        d.execute("INSERT INTO orchestrator_workers VALUES ('qa','personal','p','fake:qa','review','mock',1)")
         d.execute("INSERT INTO orchestrator_worker_assignments VALUES ('build','dev','active')")
         d.execute("INSERT INTO orchestrator_worker_assignments VALUES ('review-1','qa','active')")
         d.execute("UPDATE tasks SET state='verified',evidence_ref='mock-ref' WHERE task_id IN ('build','review-1')")
@@ -160,6 +164,39 @@ def test_disabled_reviewer_fails_closed(db,evid):
         d.execute("UPDATE orchestrator_workers SET enabled=0 WHERE worker_id='qa'")
     with pytest.raises(ValueError, match="enabled mock review worker"):
         ledger.record_mock(target_task_id="build",reviewer_task_id="review-1",head_sha=SHA,decision="approved")
+
+def test_reviewer_must_share_project_account_but_not_session(db,evid):
+    evid.inspect_mock(task_id="build",repository_id="123",pr_number=4,
+                      expected_head_sha=SHA,run_id=1,probe=FakeProbe())
+    ledger=ReviewLedger(db)
+    for column,value in (("account_id","other"),("project_id","elsewhere"),
+                         ("session_key","fake:dev")):
+        with db._connect() as d:
+            d.execute(f"UPDATE orchestrator_workers SET {column}=? WHERE worker_id='qa'",(value,))
+        with pytest.raises(ValueError,match="identity, account, project or session"):
+            ledger.record_mock(target_task_id="build",reviewer_task_id="review-1",
+                               head_sha=SHA,decision="approved")
+        with db._connect() as d:
+            d.execute(f"UPDATE orchestrator_workers SET {column}=? WHERE worker_id='qa'",
+                      ({"account_id":"personal","project_id":"p","session_key":"fake:qa"}[column],))
+
+
+def test_reviewer_rejects_disabled_or_cross_project_implementer(db,evid):
+    evid.inspect_mock(task_id="build",repository_id="123",pr_number=4,
+                      expected_head_sha=SHA,run_id=1,probe=FakeProbe())
+    ledger=ReviewLedger(db)
+    with db._connect() as d:
+        d.execute("UPDATE orchestrator_workers SET enabled=0 WHERE worker_id='dev'")
+    with pytest.raises(ValueError,match="identity, account, project or session"):
+        ledger.record_mock(target_task_id="build",reviewer_task_id="review-1",
+                           head_sha=SHA,decision="approved")
+    with db._connect() as d:
+        d.execute("UPDATE orchestrator_workers SET enabled=1 WHERE worker_id='dev'")
+        d.execute("UPDATE tasks SET project_id='another' WHERE task_id='review-1'")
+    with pytest.raises(ValueError,match="same project"):
+        ledger.record_mock(target_task_id="build",reviewer_task_id="review-1",
+                           head_sha=SHA,decision="approved")
+
 
 def test_callback_inbox_survives_database_reopen(db):
     outbox=MockOutbox(db)
