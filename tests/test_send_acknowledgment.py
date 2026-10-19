@@ -105,7 +105,7 @@ async def test_send_acknowledged_when_user_count_increases(monkeypatch):
     driver._capture_pre_send_fallback_anchor = AsyncMock(return_value=anchor)
 
     # After send: user count goes from 0 to 1 (message landed)
-    poll_count = {"n": 0}
+
 
     async def fake_js_strict(expr, timeout=15):
         # Send acknowledgment check: user count + composer present + empty

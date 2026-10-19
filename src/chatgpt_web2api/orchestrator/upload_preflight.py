@@ -161,7 +161,8 @@ class UploadPreflight:
             row=db.execute("""SELECT task_id,worker_id,package_sha256,model,effort,
                 apps_json,assurance,created_at FROM orchestrator_mock_upload_preflight
                 WHERE task_id=?""",(task_id,)).fetchone()
-            if not row:return None
+            if not row:
+                return None
             public=dict(row)
             public["required_apps"]=json.loads(public.pop("apps_json"))
             public["live_send_permitted"]=False

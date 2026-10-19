@@ -67,7 +67,8 @@ def test_mcp_whitelist_has_no_mutating_tool(db):
 
 def test_missing_database_cannot_be_created_by_read_only_observer(tmp_path):
     p=tmp_path/'missing.sqlite'
-    with pytest.raises(FileNotFoundError):Observer(p)
+    with pytest.raises(FileNotFoundError):
+        Observer(p)
     assert not p.exists()
 
 
@@ -93,7 +94,10 @@ def test_read_only_connections_are_closed_after_each_query(db, monkeypatch):
 
 def test_invalid_pagination(db):
     o=Observer(db)
-    with pytest.raises(ValueError):o.events(after=-1)
-    with pytest.raises(ValueError):o.callbacks(limit=9999)
-    with pytest.raises(ValueError):o.workers('acc',limit=100)
+    with pytest.raises(ValueError):
+        o.events(after=-1)
+    with pytest.raises(ValueError):
+        o.callbacks(limit=9999)
+    with pytest.raises(ValueError):
+        o.workers('acc',limit=100)
 

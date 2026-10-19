@@ -9,11 +9,11 @@ import sqlite3
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 
-class TaskState(str, Enum):
+class TaskState(StrEnum):
     QUEUED = "queued"
     RESERVED = "reserved"
     DISPATCHING = "dispatching"

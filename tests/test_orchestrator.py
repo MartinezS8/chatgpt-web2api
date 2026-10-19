@@ -63,13 +63,15 @@ class OrchestratorTests(unittest.TestCase):
         self.assertIsNone(self.db.claim("sample"))
 
     def test_five_slot_limit(self):
-        for n in range(7): self.task(f"t{n}")
+        for n in range(7):
+            self.task(f"t{n}")
         claims = [self.db.claim("sample") for _ in range(7)]
         self.assertEqual(sum(item is not None for item in claims), 5)
         self.assertIsNone(self.db.claim("sample"))
 
     def test_concurrent_claims_no_double_reservation(self):
-        for n in range(12): self.task(f"t{n}")
+        for n in range(12):
+            self.task(f"t{n}")
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
             results = list(ex.map(lambda _: self.db.claim("sample"), range(12)))
         actual = [r for r in results if r]

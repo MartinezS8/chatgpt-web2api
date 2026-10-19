@@ -35,14 +35,22 @@ def dispatch_observer(observer: Observer, name: str, arguments: dict | None = No
         allowed |= {"after", "limit"}
     if set(args) - allowed:
         raise ValueError("unsupported tool arguments")
-    if name == "orchestrator_capabilities":return observer.capabilities()
-    if name == "orchestrator_status":return observer.status(args["project_id"])
-    if name == "orchestrator_workers":return observer.workers(args["account_id"])
-    if name == "orchestrator_reviews":return observer.reviews(args["target_task_id"])
-    if name == "orchestrator_proposals":return observer.proposals(args["target_task_id"])
-    if name == "orchestrator_evidence":return observer.evidence(args["task_id"])
-    if name == "orchestrator_events":return observer.events(after=args.get("after",0),limit=args.get("limit",100))
-    if name == "orchestrator_callbacks":return observer.callbacks(after=args.get("after",0),limit=args.get("limit",100))
+    if name == "orchestrator_capabilities":
+        return observer.capabilities()
+    if name == "orchestrator_status":
+        return observer.status(args["project_id"])
+    if name == "orchestrator_workers":
+        return observer.workers(args["account_id"])
+    if name == "orchestrator_reviews":
+        return observer.reviews(args["target_task_id"])
+    if name == "orchestrator_proposals":
+        return observer.proposals(args["target_task_id"])
+    if name == "orchestrator_evidence":
+        return observer.evidence(args["task_id"])
+    if name == "orchestrator_events":
+        return observer.events(after=args.get("after",0),limit=args.get("limit",100))
+    if name == "orchestrator_callbacks":
+        return observer.callbacks(after=args.get("after",0),limit=args.get("limit",100))
     raise ValueError("forbidden MCP operation")
 
 
@@ -82,7 +90,8 @@ def main():
     parser=argparse.ArgumentParser(description="Read-only Codex orchestrator MCP stdio observer")
     parser.add_argument("--db",default=os.environ.get("CHATGPT_ORCHESTRATOR_DB"))
     args=parser.parse_args()
-    if not args.db:parser.error("--db or CHATGPT_ORCHESTRATOR_DB required")
+    if not args.db:
+        parser.error("--db or CHATGPT_ORCHESTRATOR_DB required")
     asyncio.run(run_server(args.db))
 
 

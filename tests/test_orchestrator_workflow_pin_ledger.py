@@ -10,7 +10,7 @@ import json
 from dataclasses import replace
 
 import pytest
-from test_orchestrator_provider_evidence import SHA, STAMP, FakeReader, inspect
+from test_orchestrator_provider_evidence import SHA, STAMP, FakeReader, inspect, store as store
 from test_orchestrator_task_review_evidence import Reviewer
 
 from chatgpt_web2api.orchestrator.github_readonly_evidence import GitHubReadOnlyEvidence

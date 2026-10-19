@@ -4,7 +4,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from test_orchestrator_provider_evidence import SHA, STAMP
+from test_orchestrator_provider_evidence import SHA, STAMP, store as store
 from test_orchestrator_task_review_evidence import record, seed
 
 from chatgpt_web2api.orchestrator.implementer_provenance import (
@@ -115,13 +115,19 @@ def test_modified_commit_metadata_denied(prepared,changed):
 @pytest.mark.parametrize("change", ["fork","head","closed","base","repo"])
 def test_moved_or_forked_head_or_repository_denied(prepared,change):
     reader = Commits()
-    if change == "fork": reader.pr["head"]["repo"]["id"]=138
-    elif change == "head": reader.pr["head"]["sha"]="b"*40
-    elif change == "closed": reader.pr["state"]="closed"
-    elif change == "base": reader.pr["base"]["repo"]["id"]=138
-    else: reader.repo["id"]=138
+    if change == "fork":
+        reader.pr["head"]["repo"]["id"]=138
+    elif change == "head":
+        reader.pr["head"]["sha"]="b"*40
+    elif change == "closed":
+        reader.pr["state"]="closed"
+    elif change == "base":
+        reader.pr["base"]["repo"]["id"]=138
+    else:
+        reader.repo["id"]=138
     led,_=source(prepared,reader)
-    with pytest.raises(ValueError): check(led)
+    with pytest.raises(ValueError):
+        check(led)
     assert led.get("impl") is None
 
 
@@ -139,8 +145,10 @@ def test_moved_or_forked_head_or_repository_denied(prepared,change):
 ])
 def test_worker_or_task_or_review_mutation_denied_before_github(prepared,mutate):
     led, reader = source(prepared)
-    with prepared._connect() as db: db.execute(mutate)
-    with pytest.raises(ValueError): check(led)
+    with prepared._connect() as db:
+        db.execute(mutate)
+    with pytest.raises(ValueError):
+        check(led)
     assert not reader.calls and led.get("impl") is None
 
 
@@ -156,7 +164,8 @@ def test_external_read_race_with_worker_reassignment_fails(prepared):
         with prepared._connect() as d:
             d.execute("UPDATE orchestrator_worker_assignments SET claim_version=claim_version+1")
     led,_=source(prepared,Commits(mutation=change))
-    with pytest.raises(ValueError):check(led)
+    with pytest.raises(ValueError):
+        check(led)
     assert led.get("impl") is None
 
 
@@ -165,7 +174,8 @@ def test_external_read_race_with_review_digest_fails(prepared):
         with prepared._connect() as d:
             d.execute("UPDATE orchestrator_provider_review_observations SET digest='changed'")
     led,_=source(prepared,Commits(mutation=change))
-    with pytest.raises(ValueError):check(led)
+    with pytest.raises(ValueError):
+        check(led)
     assert led.get("impl") is None
 
 
@@ -204,5 +214,6 @@ def test_assignment_version_cannot_be_zero_or_in_the_future(prepared,bad_version
     with prepared._connect() as db:
         db.execute("UPDATE orchestrator_worker_assignments SET claim_version=?",(bad_version,))
     led,reader=source(prepared)
-    with pytest.raises(ValueError):check(led)
+    with pytest.raises(ValueError):
+        check(led)
     assert reader.calls==[]
