@@ -52,7 +52,11 @@ def execute_worker_command(args, store):
                               enabled=not args.disabled))
         return {"worker_id": args.id, "created": created, "external_actions": False}
     if args.command == "list-workers":
-        return {"account": args.account, "workers": registry.list(args.account)}
+        workers = registry.list(args.account)
+        return {"account": args.account, "workers": [
+            {key: value for key, value in worker.items() if key != "session_key"}
+            for worker in workers
+        ]}
     if args.command == "worker-assignments":
         return {"account": args.account, "assignments": registry.assignments(args.account)}
     if args.command == "worker-heartbeat":
