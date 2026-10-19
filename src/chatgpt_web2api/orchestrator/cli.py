@@ -13,6 +13,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+from .observer_commands import OBS_COMMANDS, configure_observer_commands, execute_observer_command
 from .outbox import DispatchOutbox
 from .resource_registry import ResourceIdentity, ResourceRegistry
 from .store import Store, TaskSpec
@@ -85,6 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = commands.add_parser("recover", help="Requeue only expired pre-send leases; quarantine uncertain sends")
     s.add_argument("--project", required=True)
     configure_worker_commands(commands)
+    configure_observer_commands(commands)
     return p
 
 
@@ -120,6 +122,8 @@ def _public_task(row: dict | None) -> dict | None:
 
 
 def execute(args: argparse.Namespace) -> dict:
+    if args.command == "observe-capabilities":
+        return execute_observer_command(args, None)
     if args.command == "worker-capabilities":
         from .capabilities import capabilities
 
@@ -129,6 +133,8 @@ def execute(args: argparse.Namespace) -> dict:
     if not args.db:
         raise ValueError("--db or CHATGPT_ORCHESTRATOR_DB must be set")
     db_path = Path(args.db).expanduser().resolve()
+    if args.command in OBS_COMMANDS:
+        return execute_observer_command(args, db_path)
     if args.command in WORKER_READ_COMMANDS and not db_path.is_file():
         raise FileNotFoundError(f"database does not exist: {db_path}")
     if args.command in WORKER_COMMANDS - WORKER_READ_COMMANDS:
