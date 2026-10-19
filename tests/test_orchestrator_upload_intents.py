@@ -206,3 +206,22 @@ def test_perform_mock_timeout_quarantines_and_never_resends(item):
         item.gate.perform_mock(task_id="task-1",worker_id="worker-1",
                                claim_token=item.token,uploader=next_attempt)
     assert next_attempt.calls==[]
+
+
+def test_ready_check_is_bound_to_current_claim_and_package(item):
+    with pytest.raises(ValueError,match="not ready"):
+        item.gate.assert_ready(task_id="task-1", worker_id="worker-1",
+                               claim_token=item.token, package_sha256="c"*64)
+    adapter=MockUploader()
+    item.gate.perform_mock(task_id="task-1", worker_id="worker-1",
+                           claim_token=item.token,uploader=adapter)
+    item.gate.assert_ready(task_id="task-1",worker_id="worker-1",
+                           claim_token=item.token,package_sha256="c"*64)
+    with pytest.raises(ValueError,match="not ready"):
+        item.gate.assert_ready(task_id="task-1",worker_id="worker-1",
+                               claim_token=item.token,package_sha256="d"*64)
+    with item.db._connect() as db:
+        db.execute("UPDATE tasks SET claim_token='rotated' WHERE task_id='task-1'")
+    with pytest.raises(ValueError,match="stale reservation"):
+        item.gate.assert_ready(task_id="task-1",worker_id="worker-1",
+                               claim_token=item.token,package_sha256="c"*64)
