@@ -18,7 +18,8 @@ class ResourceAuthorityTest(unittest.TestCase):
         self.registry.register('repo:frontend',gh,operator='owner')
         a = self.registry.task_with_resolved_scopes(TaskSpec('a','project1','implement','p'),(('gh:owner/repo','src'),))
         b = self.registry.task_with_resolved_scopes(TaskSpec('b','project2','implement','p'),(('repo:frontend','src/views'),))
-        self.store.create(a);self.store.create(b)
+        self.store.create(a)
+        self.store.create(b)
         self.assertIsNotNone(self.store.claim('project1'))
         self.assertIsNone(self.store.claim('project2'))
 
@@ -31,9 +32,11 @@ class ResourceAuthorityTest(unittest.TestCase):
         self.assertEqual(a,'supabase:project/abcdefghijklm/env/staging')
 
     def test_no_unverified_alias_or_id_rebinding(self):
-        with self.assertRaises(ValueError): self.registry.resolve('repo:missing')
+        with self.assertRaises(ValueError):
+            self.registry.resolve('repo:missing')
         self.registry.register('repo:a',ResourceIdentity('github','123'),operator='admin')
-        with self.assertRaises(ValueError): self.registry.register('repo:a',ResourceIdentity('github','124'),operator='admin')
+        with self.assertRaises(ValueError):
+            self.registry.register('repo:a',ResourceIdentity('github','124'),operator='admin')
         self.assertFalse(self.registry.provider_write_authorized())
 
     def test_never_accept_self_claimed_provider_verification(self):
@@ -43,13 +46,16 @@ class ResourceAuthorityTest(unittest.TestCase):
     def test_reject_path_escape_or_ambiguous_id(self):
         self.registry.register('repo:a',ResourceIdentity('github','123'),operator='admin')
         for bad in ('/etc','..','.','a//b','a\\b','a/../b','a/*','a/:'):
-            with self.subTest(bad=bad),self.assertRaises(ValueError): self.registry.resolve('repo:a',bad)
+            with self.subTest(bad=bad),self.assertRaises(ValueError):
+                self.registry.resolve('repo:a',bad)
         for bad in ('owner/name','0','0001','-12'):
-            with self.subTest(id=bad),self.assertRaises(ValueError): ResourceIdentity('github',bad).key()
+            with self.subTest(id=bad),self.assertRaises(ValueError):
+                ResourceIdentity('github',bad).key()
 
     def test_legacy_scope_mix_denied(self):
         self.registry.register('repo:a',ResourceIdentity('github','123'),operator='admin')
         with self.assertRaises(ValueError):
             self.registry.task_with_resolved_scopes(TaskSpec('x','p','implement','p',write_scopes=('repo:old',)),(('repo:a',None),))
 
-if __name__=='__main__': unittest.main()
+if __name__=='__main__':
+    unittest.main()
