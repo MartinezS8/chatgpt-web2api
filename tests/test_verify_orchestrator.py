@@ -1,4 +1,5 @@
 """Isolated verification-gate tests: only temporary Git repositories, no provider calls."""
+
 from __future__ import annotations
 
 import importlib.util
@@ -196,7 +197,8 @@ def test_inherited_pytest_selectors_and_external_pythonpath_removed(
         assert "PYTEST_ADDOPTS" not in child
         assert "PYTEST_PLUGINS" not in child
         assert "PYTEST_DISABLE_PLUGIN_AUTOLOAD" not in child
-        assert child["PYTHONPATH"] == str(root / "src")
+        assert child["PYTHONPATH"] == checker.os.pathsep.join((str(root / "src"),
+                                                               str(root / "tests")))
     assert "-p" in calls[1][0] and "no:cacheprovider" in calls[1][0]
 
 
