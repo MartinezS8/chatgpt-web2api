@@ -25,7 +25,8 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 19. [PR #22](https://github.com/MartinezS8/chatgpt-web2api/pull/22): independent read-only GitHub reviewer permission/identity and SHA verification, no task finalization → PR #21 (Draft).
 20. [PR #23](https://github.com/MartinezS8/chatgpt-web2api/pull/23): bind read-only GitHub reviewer observations to task/dispatch/CI snapshot/package/claim, preserving all locks → PR #22 (Draft).
 21. [PR #24](https://github.com/MartinezS8/chatgpt-web2api/pull/24): signed GitHub PR-HEAD commit metadata plus active mock-worker/claim attribution, read-only and not an authenticated remote session → PR #23 (Draft).
-22. **PR #25 (this branch)**: operator-pinned workflow file provenance, with exact commit blob SHA, no merge permission → PR #24 (Draft).
+22. [PR #25](https://github.com/MartinezS8/chatgpt-web2api/pull/25): operator-pinned workflow file provenance, with exact commit blob SHA, no merge permission → PR #24 (Draft).
+23. **PR #26 (this branch)**: persist pinned CI workflow blob in fenced task evidence and transitive review digests; preserve legacy read-only receipts → PR #25 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -275,6 +276,18 @@ See [PR-22 commit and worker correlation design](ORCHESTRATOR_PR22_IMPLEMENTER_C
 - [ ] P1: live supported transport, file uploads, callbacks, app selection and High model verification remain unimplemented.
 
 Details: [PR-23 workflow provenance design](ORCHESTRATOR_PR23_WORKFLOW_SOURCE_PIN.md).
+
+## PR-24 (P0) — Task-bound workflow source pin evidence (Draft PR #26)
+
+- [x] Seal verified workflow source SHA into `orchestrator_provider_observations`, plus task/attempt/package/claim/CI digest; prohibit fake pins from unpinned gates.
+- [x] Add `BEGIN IMMEDIATE` protected SQLite additive migration; old unpinned digests preserved, but old receipts cannot satisfy a newly enforced pin policy.
+- [x] Bind source SHA into `TaskReviewEvidenceLedger` CI verification and downstream implementer review snapshots; tampered or stale pin fails before external reviewer reads.
+- [x] Add offline pinned/migration/review regression tests and scoped design note; **committed, not executed** on the actual stacked checkout.
+- [ ] P0: run exact PR #1–#26 stacked checkout tests, Ruff, package build and Windows/Linux/macOS Python 3.11/3.12 checks; GitHub Actions feature-branch run count is unconfirmed and was zero at last check.
+- [ ] P0: external CI dependencies remain mutable; an approved protected source plus human approval, authenticated worker and atomic finalizer are still missing.
+- [ ] P1: verified live transport and ChatGPT-web model/app/file semantics remain unimplemented; this is audit-only.
+
+See [PR-24 pinned CI evidence ledger](ORCHESTRATOR_PR24_TASK_CI_WORKFLOW_PIN_LEDGER.md). A signed commit, CI success or a mock worker cannot grant live send, merge, task completion or lock-release authority.
 
 ## PR-08 (P2) — Windows lifecycle and release
 
