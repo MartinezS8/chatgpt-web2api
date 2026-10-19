@@ -28,7 +28,8 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 22. [PR #25](https://github.com/MartinezS8/chatgpt-web2api/pull/25): operator-pinned workflow file provenance, with exact commit blob SHA, no merge permission → PR #24 (Draft).
 23. [PR #26](https://github.com/MartinezS8/chatgpt-web2api/pull/26): persist pinned CI workflow blob in fenced task evidence and transitive review digests; preserve legacy read-only receipts → PR #25 (Draft).
 24. [PR #27](https://github.com/MartinezS8/chatgpt-web2api/pull/27): verify local tests against exact clean Git HEAD, fail closed on mismatch, distinguish smoke from complete local verification → PR #26 (Draft).
-25. **PR #28 (this branch)**: close post-test checkout TOCTOU and inherited Git/pytest environment override paths → PR #27 (Draft).
+25. [PR #28](https://github.com/MartinezS8/chatgpt-web2api/pull/28): close post-test checkout TOCTOU and inherited Git/pytest environment override paths → PR #27 (Draft).
+26. **PR #29 (this branch)**: push-only feature-branch validation workflow with read-only six-platform/Python checks and diagnostics; NOT an authoritative release workflow → PR #28 (Draft).
 
 **De-duplication:** PR #9 and PR #11 were competing PR-04 explorations and are closed without merge. The canonical chain is #1–#8 → #10 → #12. Do not auto-merge alternative callbacks/review implementations from PR #11. GitHub Actions and Issues are *not* blockers for continuing offline implementation; Codex can run the full suite later before merging.
 
@@ -314,6 +315,19 @@ See [PR-25 reproducible verification](ORCHESTRATOR_PR25_REPRODUCIBLE_VERIFICATIO
 - [ ] P0: authenticated worker identity, reviewed current SHA and human-approved transactional finalizer still blocked. No live ChatGPT Plus web automation, plugin control or uploads.
 
 See [PR-26 verifier postflight and environment design](ORCHESTRATOR_PR26_VERIFIER_TOCTOU_ENV_FENCING.md).
+
+## PR-27 (P0) — Stacked-branch CI diagnostics (Draft PR #29)
+
+- [x] Source review: prior `.github/workflows/ci.yml` only targeted `master`; stacked `codex/orchestrator-*` pushes had **zero** workflow runs, making all full test evidence unverified.
+- [x] Add separate push-only `.github/workflows/orchestrator-branch-validation.yml` with `contents: read`, no checkout credentials, full Git SHA pins for `actions/checkout@v4.2.2` and `actions/setup-python@v5.6.0`; six OS/Python combinations and a conditional package build.
+- [x] GitHub began creating actual feature-branch Actions runs. Initial diagnostic run 39327764123 confirmed real **pytest collection failure (4 unresolved sibling-module imports)** and **Ruff 115 violations** across the current checkout. Do not call matrix green.
+- [x] Adjust strict verifier `PYTHONPATH` to pinned `src` **and** `tests` for actual cross-test helper imports; update regression expectation. Add five static workflow safety-contract tests.
+- [ ] P0: inspect rerun after the import fix, repair verified test failures; full matrix, Ruff and wheel build remain unsatisfied until GitHub records passing evidence.
+- [ ] P0: fix or explicitly baseline repository-wide Ruff debt under reviewed policy; never silently disable lint or claim a passing gate.
+- [ ] P0: diagnostics workflow YAML lives on feature branch and can be edited by that branch. It is **not** a protected/approved CI source and must never satisfy task finalizer or operator permission checks.
+- [ ] P0: GitHub hosted runner/PyPI dependency provenance, protected workflow pin, reviewer/worker identity, explicit consent and finalizer remain separate blockers.
+
+See [PR-27 branch validation diagnostics](ORCHESTRATOR_PR27_BRANCH_CI_DIAGNOSTICS.md).
 
 ## PR-08 (P2) — Windows lifecycle and release
 
