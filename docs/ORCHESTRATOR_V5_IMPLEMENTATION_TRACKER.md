@@ -9,6 +9,7 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 3. [PR #3](https://github.com/MartinezS8/chatgpt-web2api/pull/3): PR-02B resource authority → PR #2 (Draft).
 4. [PR #4](https://github.com/MartinezS8/chatgpt-web2api/pull/4): PR-02C immutable packages and dispatch outbox → PR #3 (Draft).
 5. [PR #5](https://github.com/MartinezS8/chatgpt-web2api/pull/5): PR-03 mock-only worker registry / bounded scheduler / supervisor → PR #4 (Draft).
+6. **PR #6 (proposed)**: PR-04 offline callback/evidence/review/planner → PR #5 (Draft).
 
 **Why no GitHub Issues?** GitHub returned HTTP 410, `Issues has been disabled in this repository`, while attempting to file this roadmap. This document is the canonical repository-side backlog until the repository owner decides to enable Issues. Do not silently turn Issues on.
 
@@ -49,17 +50,24 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 
 **Acceptance so far:** no mock-worker claim collision; no unattended re-send; reproducible local worker registry on restart. **Do not describe this as live 5-agent ChatGPT support.**
 
-## PR-04 (P1) — Callback, verification, independent review, planning
+## PR-04 (P1) — Offline callback, provider-evidence contracts, review and planning
 
-Planned modules: `events.py`, `delivery.py`, `evidence.py`, `review_policy.py`, `planner.py`.
+**Implemented as an isolated Draft on `codex/orchestrator-v7-evidence-review`:**
+[PR-04 technical notes](ORCHESTRATOR_PR04_CALLBACK_EVIDENCE_REVIEW.md).
 
-- [ ] Durable `attempt_id` and external turn/message identity correlation from an **authorized** transport.
-- [ ] Progress notifications are advisory; lost progress is not confused with completion.
-- [ ] Immutable, provider-verified GitHub commit/PR/CI evidence and branch-SHA invalidation.
-- [ ] Independent read-only reviewer (cannot self-approve); human approval for consequential database / merge actions.
-- [ ] Bounded fix–review loop with explicit budgets and failure exits.
+- [x] Correlated **mock** progress/completion callbacks against V5 outbox attempt + conversation + delivery IDs. Progress is advisory, never proof.
+- [x] Persisted event replay and per-consumer cursor acknowledgment without leaking prompt contents.
+- [x] Fail-closed provider-evidence verifier **interface** with fresh (≤120s), matching GitHub repo-ID/PR-head/commit/CI-SHA/run/conclusion checks; local tests use a fake provider.
+- [x] Read-only, independently assigned review worker with distinct account/session checks, evidence-SHA-bound immutable verdict; mock attestation only.
+- [x] Review task planner without a FINISHED-dependency deadlock; bounded idempotent fix proposals retain the unresolved parent write-lock.
+- [x] **59 offline tests + 8 subtests** based on V4 fixtures and structurally equivalent V5 tables; Python compile validation passed.
+- [ ] Real provider-authenticated GitHub/CI evidence and conditional merge (NOT implemented).
+- [ ] Real authenticated callback ingress with worker ↔ session ↔ attempt binding; only `mode=mock` accepted.
+- [ ] Authentic reviewer-output provenance; human/authorization gate for release. Existing `Store.finalize_verified()` remains a legacy bypass and must be denied for production transport.
+- [ ] Fully assembled V5/PR-03/upstream integration suite, Ruff and Windows CI (deferred to Codex).
+- [ ] Live Codex/ChatGPT response callbacks, app/plugin selection and uploads (NOT implemented).
 
-**Acceptance:** duplicate/out-of-order/mismatched callbacks never result in a second completion or unsafe merge.
+**Do not interpret mock callbacks or a provider-verifier interface as working plus-account/web-chat integration.** Next: production-grade PR-04B identity/evidence integration and PR-05 low-token Codex MCP with strict capability/authorization checks.
 
 ## PR-05 (P1) — Low-token Codex CLI/MCP
 
