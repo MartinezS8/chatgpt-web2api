@@ -11,7 +11,7 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 5. [PR #5](https://github.com/MartinezS8/chatgpt-web2api/pull/5): PR-03 mock-only worker registry / bounded scheduler / supervisor → PR #4 (Draft).
 6. [PR #6](https://github.com/MartinezS8/chatgpt-web2api/pull/6): offline callback/evidence/review mock ledger → PR #5 (Draft).
 7. [PR #7](https://github.com/MartinezS8/chatgpt-web2api/pull/7): read-only Codex CLI/MCP observer → PR #6 (Draft).
-8. PR-06A: sealed-package mock upload receipts and per-message app/model capability gate → PR #7 (Draft).
+8. [PR #8](https://github.com/MartinezS8/chatgpt-web2api/pull/8): sealed-package mock upload receipts and per-message app/model capability gate → PR #7 (Draft).
 
 **Why no GitHub Issues?** GitHub returned HTTP 410, `Issues has been disabled in this repository`, while attempting to file this roadmap. This document is the canonical repository-side backlog until the repository owner decides to enable Issues. Do not silently turn Issues on.
 
@@ -24,6 +24,10 @@ This is a **stacked, unmerged** plan. Nothing is in `master` until individually 
 - [x] Local command-line task registration, alias resolution, package seal/inspect, and event cursor operations (PR #4).
 - [ ] End-to-end integration with an authorized live transport (not yet implemented).
 - [ ] Real ChatGPT file uploads, hosted app/plugin selection, actual GPT-6 High proof, provider-verified permissions, and account-limit enforcement (not implemented).
+
+## Canonical Codex handoff
+
+[Codex offline validation and next-gates runbook](CODEX_NEXT_GATES_RUNBOOK.md) plus `scripts/verify_orchestrator.py` are the immediate local handoff. GitHub Actions and Issues may be handled by Codex later, per the repository owner's preference. **No live ChatGPT/Plus transport, plugin selection or file upload has been validated.**
 
 ## Gate 0 (P0) — CI, legal/technical capability and independent audit
 
