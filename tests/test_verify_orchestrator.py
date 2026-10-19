@@ -61,6 +61,8 @@ def test_strict_full_clean_sha_reports_only_local_gate(checkout, monkeypatch, ca
     data = output(capsys)
     assert data["ok"] and data["local_gate_complete"]
     assert data["head_sha"] == sha and data["worktree_clean_at_start"]
+    assert data["postflight_ok"] and data["head_sha_at_end"] == sha
+    assert data["worktree_clean_at_end"]
     assert not data["network_isolation_verified"] and not data["live_provider_capabilities_verified"]
     assert len(calls) == 3 and all(c[1]["env"]["W2A_E2E_RUN"] == "0" for c in calls)
     assert all("stdout_tail" not in x for x in data["checks"])
@@ -129,3 +131,92 @@ def test_invalid_git_metadata_refused(checkout, tmp_path, capsys):
     root, _ = checkout
     assert checker.main(["--repo", str(root / "src")]) == 2
     assert not output(capsys)["tests_started"]
+
+
+def test_forged_success_after_tracked_file_mutation_is_rejected(
+    checkout, monkeypatch, capsys,
+):
+    root, sha = checkout
+    original = checker.subprocess.run
+    edited = root / "tests" / "test_orchestrator_example.py"
+
+    def runner(args, **kw):
+        if args[0] == "git":
+            return original(args, **kw)
+        if "pytest" in args:
+            edited.write_text("def test_example(): assert False\\n", encoding="utf8")
+        return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(checker.subprocess, "run", runner)
+    assert checker.main(["--repo", str(root), "--strict", "--full",
+                         "--expected-sha", sha]) == 1
+    result = output(capsys)
+    assert all(x["exit_code"] == 0 for x in result["checks"])
+    assert not result["postflight_ok"] and not result["local_gate_complete"]
+    assert "dirty" in result["postflight_error"]
+    assert not result["ok"]
+
+
+def test_commit_moves_while_tests_run_is_rejected(checkout, monkeypatch, capsys):
+    root, sha = checkout
+    original = checker.subprocess.run
+
+    def runner(args, **kw):
+        if args[0] == "git":
+            return original(args, **kw)
+        if "pytest" in args:
+            original(["git", "commit", "-qm", "unexpected", "--allow-empty"],
+                     cwd=root, check=True)
+        return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(checker.subprocess, "run", runner)
+    assert checker.main(["--repo", str(root), "--strict", "--full",
+                         "--expected-sha", sha]) == 1
+    result = output(capsys)
+    assert result["postflight_ok"] is False and not result["ok"]
+    assert "differs from --expected-sha" in result["postflight_error"]
+
+
+def test_inherited_pytest_selectors_and_external_pythonpath_removed(
+    checkout, monkeypatch, capsys,
+):
+    root, sha = checkout
+    monkeypatch.setenv("PYTEST_ADDOPTS", "--ignore=tests --maxfail=1")
+    monkeypatch.setenv("PYTEST_PLUGINS", "untrusted_extra_test_plugin")
+    monkeypatch.setenv("PYTHONPATH", "/tmp/untrusted")
+    calls = fake_checks(monkeypatch)
+    assert checker.main(["--repo", str(root), "--strict", "--full",
+                         "--expected-sha", sha]) == 0
+    result = output(capsys)
+    assert result["postflight_ok"] and result["local_gate_complete"]
+    assert calls
+    for _, kwargs in calls:
+        child = kwargs["env"]
+        assert "PYTEST_ADDOPTS" not in child
+        assert "PYTEST_PLUGINS" not in child
+        assert child["PYTHONPATH"] == str(root / "src")
+    assert "-p" in calls[1][0] and "no:cacheprovider" in calls[1][0]
+
+
+def test_unexpected_git_error_during_postflight_fails_closed(
+    checkout, monkeypatch, capsys,
+):
+    root, sha = checkout
+    calls = fake_checks(monkeypatch)
+    original = checker._preflight
+    seen = 0
+
+    def preflight(*args, **kwargs):
+        nonlocal seen
+        seen += 1
+        if seen == 2:
+            raise ValueError("Git metadata unavailable; no tests were executed")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(checker, "_preflight", preflight)
+    assert checker.main(["--repo", str(root), "--strict", "--full",
+                         "--expected-sha", sha]) == 1
+    result = output(capsys)
+    assert len(calls) == 3
+    assert not result["postflight_ok"] and not result["local_gate_complete"]
+    assert "postflight_error" in result and not result["ok"]
