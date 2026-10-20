@@ -1,8 +1,9 @@
-# Phase C isolated preparation — not accepted
+# Phase C candidate — draft review, acceptance blocked
 
-Local candidate on Phase B implementation `7fc09748c07e5678dda24c0f9b42d22e476583b4`.
-Phase B's security acceptance remains partial. This branch is intentionally
-local and is not a claim of an accepted Phase C or real-worker readiness.
+Candidate based on Phase B implementation `7fc09748c07e5678dda24c0f9b42d22e476583b4`.
+It is published for draft review at the user's direction while Phase B's
+security acceptance remains partial. Draft publication does not accept Phase C
+or establish real-worker readiness.
 
 The isolated eight-process initialization probe reproduced two Python 3.12
 failures at `PRAGMA journal_mode=WAL` with SQLite BUSY, after migration had
@@ -16,7 +17,8 @@ still apply independently. Unknown schema/integrity checks and migration
 quarantine run before WAL promotion as before.
 
 Regression tests exercise transient retries, extended codes, deadline,
-nonlock/unknown errors and refused journal mode. Parallel process probes and
-full local strict gates must validate this candidate; hosted cross-platform
-evidence is deliberately not claimed. Publication/integration waits for the
-Phase B gate or an explicitly revised development plan.
+nonlock/unknown errors and refused journal mode. The original candidate commit
+passed local strict gates on Python 3.11 and 3.12 and five synchronized batches
+of eight processes per version. Hosted cross-platform evidence is tracked on
+the draft PR. Integration/acceptance remains blocked pending Phase B security
+evidence and review of this candidate.
