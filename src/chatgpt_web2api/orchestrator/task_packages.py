@@ -11,10 +11,10 @@ import json
 import mimetypes
 import os
 import stat
-import tempfile
 import time
 from pathlib import Path
 
+from .stage_maintenance import create_managed_stage, stage_guard
 from .storage_hardening import reject_reparse_path
 from .store import Store
 
@@ -53,43 +53,59 @@ class TaskPackages:
                 package_sha256 TEXT NOT NULL, prompt TEXT NOT NULL,
                 attachments_json TEXT NOT NULL, sealed_at REAL NOT NULL)""")
 
-    def _store_blob(self, path: Path, expected_size: int) -> dict:
-        """Copy to content-addressed snapshot, then use the snapshot only."""
+    def _store_blob(self, path: Path, initial: os.stat_result) -> dict:
+        """Snapshot via an inode-checked source fd and cooperative stage lock.
+
+        A source-file swap after the initial seal() stat is rejected by fstat.
+        No complete Win32 reparse TOCTOU guarantee is claimed for paths writable
+        by another principal: callers must use a private allowed_root.
+        """
         h = hashlib.sha256()
-        fd, name = tempfile.mkstemp(prefix=".staged-", dir=self.blob_root)
-        try:
-            with os.fdopen(fd, "wb") as target, path.open("rb") as source:
-                size = 0
-                while True:
-                    data = source.read(64 * 1024)
-                    if not data:
-                        break
-                    size += len(data)
-                    if size > _MAX_FILE_BYTES or size > expected_size:
-                        raise ValueError("attachment mutated or exceeds size budget")
-                    h.update(data)
-                    target.write(data)
-                if size != expected_size:
-                    raise ValueError("attachment modified while snapshotting")
-                target.flush()
-                os.fsync(target.fileno())
-            digest = h.hexdigest()
-            dest = self.blob_root / digest
-            if dest.is_symlink():
-                raise ValueError("content-addressed target is symbolic link")
-            if dest.exists():
-                if not dest.is_file() or _digest(dest.read_bytes()) != digest:
-                    raise ValueError("existing blob has corrupted content")
-            else:
-                os.replace(name, dest)
-                name = ""  # ownership transferred
-                if os.name != "nt":
-                    os.chmod(dest, 0o600)
-            return {"name": path.name, "sha256": digest, "size": size,
-                    "media_type": mimetypes.guess_type(path.name)[0] or "application/octet-stream"}
-        finally:
-            if name and Path(name).exists():
-                Path(name).unlink()
+        with stage_guard(self.blob_root):
+            fd, name = create_managed_stage(self.blob_root, "staged")
+            try:
+                reject_reparse_path(
+                    path, error_message="attachment path cannot traverse a reparse point"
+                )
+                with os.fdopen(fd, "wb") as target, path.open("rb") as source:
+                    opened = os.fstat(source.fileno())
+                    identity = ("st_dev", "st_ino", "st_size", "st_mtime_ns")
+                    if any(getattr(opened, key) != getattr(initial, key) for key in identity):
+                        raise ValueError("attachment identity changed before snapshot")
+                    size = 0
+                    while True:
+                        data = source.read(64 * 1024)
+                        if not data:
+                            break
+                        size += len(data)
+                        if size > _MAX_FILE_BYTES or size > initial.st_size:
+                            raise ValueError("attachment mutated or exceeds size budget")
+                        h.update(data)
+                        target.write(data)
+                    final = os.fstat(source.fileno())
+                    if size != initial.st_size or any(
+                        getattr(final, key) != getattr(opened, key) for key in identity
+                    ):
+                        raise ValueError("attachment modified while snapshotting")
+                    target.flush()
+                    os.fsync(target.fileno())
+                digest = h.hexdigest()
+                dest = self.blob_root / digest
+                if dest.is_symlink():
+                    raise ValueError("content-addressed target is symbolic link")
+                if dest.exists():
+                    if not dest.is_file() or _digest(dest.read_bytes()) != digest:
+                        raise ValueError("existing blob has corrupted content")
+                else:
+                    os.replace(name, dest)
+                    name = None
+                    if os.name != "nt":
+                        os.chmod(dest, 0o600)
+                return {"name": path.name, "sha256": digest, "size": size,
+                        "media_type": mimetypes.guess_type(path.name)[0] or "application/octet-stream"}
+            finally:
+                if name is not None:
+                    name.unlink(missing_ok=True)
 
     def seal(self, task_id: str, prompt: str, attachments: list[str | Path] | tuple[str | Path, ...] = (),
              *, allowed_root: str | Path | None = None) -> dict:
@@ -114,7 +130,7 @@ class TaskPackages:
             allowed = None
         if allowed is not None and not allowed.is_dir():
             raise ValueError("allowed_root must be a directory")
-        checked: list[tuple[Path, int]] = []
+        checked: list[tuple[Path, os.stat_result]] = []
         total = 0
         for supplied in attachments:
             raw = Path(supplied).expanduser()
@@ -139,8 +155,8 @@ class TaskPackages:
             total += info.st_size
             if total > _MAX_TOTAL_BYTES:
                 raise ValueError("attachment package too large")
-            checked.append((real, info.st_size))
-        records = [self._store_blob(path, size) for path, size in checked]
+            checked.append((real, info))
+        records = [self._store_blob(path, info) for path, info in checked]
         if len(set(r["sha256"] for r in records)) != len(records):
             raise ValueError("duplicate attachment content")
         manifest = {"schema": 1, "task_id": task_id, "prompt_sha256": task["prompt_sha"], "attachments": records}
