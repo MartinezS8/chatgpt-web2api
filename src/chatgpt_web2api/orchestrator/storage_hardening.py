@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .stage_maintenance import create_managed_stage, stage_guard
+from .windows_acl import read_windows_descriptor, validate_private_descriptor
 
 _SID = re.compile(r"S-1-\d+(?:-\d+)+\Z")
 _LABEL = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,39}\Z")
@@ -50,6 +51,7 @@ def acl_commands(path: Path, sid: str) -> tuple[list[str], ...]:
         ["icacls.exe", root, "/inheritance:r"],
         ["icacls.exe", root, "/grant:r",
          f"*{sid}:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F"],
+        ["icacls.exe", root, "/setowner", f"*{sid}"],
         ["icacls.exe", root, "/verify"],
     )
 
@@ -135,6 +137,8 @@ def create_private_windows_workspace(label: str) -> PrivateWorkspace:
         for argv in acl_commands(root, sid):
             subprocess.run(argv, capture_output=True, text=True,
                            timeout=15, check=True)
+        _reject_reparse(root)
+        validate_private_descriptor(read_windows_descriptor(root), sid)
         _reject_reparse(root)
     except (OSError, ValueError, subprocess.SubprocessError):
         # Never leave files in a workspace whose ACL could not be established.
