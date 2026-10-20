@@ -48,6 +48,30 @@ _CLAIMED_STATES = (
 )
 
 
+def _enable_wal(db) -> None:
+    """Bounded retry of WAL promotion when parallel initializers hold locks.
+
+    SQLite's busy handler does not cover every journal-mode lock upgrade.
+    Retry only native BUSY/LOCKED codes, never corruption or I/O failures.
+    """
+    deadline = time.monotonic() + 10
+    while True:
+        try:
+            row = db.execute("PRAGMA journal_mode=WAL").fetchone()
+            if row is None or str(row[0]).lower() != "wal":
+                raise ValueError("SQLite refused WAL journal mode")
+            return
+        except sqlite3.OperationalError as exc:
+            code = getattr(exc, "sqlite_errorcode", None)
+            if not isinstance(code, int) or (code & 0xFF) not in (
+                sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED
+            ):
+                raise
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
+
+
 @dataclass(frozen=True)
 class TaskSpec:
     task_id: str
@@ -103,7 +127,7 @@ class Store:
             db.execute("PRAGMA foreign_keys=ON")
             db.execute("PRAGMA busy_timeout=10000")
             if set_wal:
-                db.execute("PRAGMA journal_mode=WAL")
+                _enable_wal(db)
             yield db
             if db.in_transaction:
                 db.commit()
