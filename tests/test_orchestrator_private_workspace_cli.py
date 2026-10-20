@@ -254,3 +254,28 @@ def test_dotdot_escape_is_rejected_before_database_open(private, tmp_path):
         _run("create-task", "--id", "t", "--project", "p", "--role",
              "implement", "--prompt-file", str(escape))
     assert not private.database.exists()
+
+
+@pytest.mark.skipif(__import__("os").name != "nt",
+                    reason="native Windows ACL inheritance and CLI provisioning")
+def test_native_cli_private_workspace_initialization_can_be_reopened():
+    import shutil
+    import uuid
+
+    from chatgpt_web2api.orchestrator.private_workspace import load_private_workspace
+
+    label = "gate-private-cli-" + uuid.uuid4().hex[:12]
+    workspace = None
+    try:
+        created = cli.execute(cli.build_parser().parse_args([
+            "init-private-workspace", "--label", label,
+        ]))
+        workspace = Path(created["workspace"])
+        assert created["windows_private_acl_provisioned"] is True
+        assert (workspace / "blobs").is_dir()
+        reopened = load_private_workspace(label)
+        assert reopened.database.is_file()
+        assert reopened.blobs.is_dir()
+    finally:
+        if workspace is not None:
+            shutil.rmtree(workspace)

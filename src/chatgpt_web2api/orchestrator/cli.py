@@ -160,6 +160,11 @@ def execute(args: argparse.Namespace) -> dict:
         private = load_private_workspace(args.private_workspace)
     if args.command == "init-private-workspace":
         workspace = create_private_windows_workspace(args.label)
+        # Windows Python 3.12.4+ mkdir(mode=0o700) adds explicit Owner
+        # Rights/Administrators ACEs. The parent is already ACL-verified:
+        # create this EMPTY child with default inheritance before
+        # TaskPackages's legacy mode=0o700 exist_ok initializer runs.
+        workspace.blobs.mkdir(mode=0o777)
         store = Store(workspace.database)
         TaskPackages(store, workspace.blobs)
         return {"workspace": str(workspace.root),

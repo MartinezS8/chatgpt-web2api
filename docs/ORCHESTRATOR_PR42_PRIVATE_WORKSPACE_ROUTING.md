@@ -27,6 +27,10 @@ python -m chatgpt_web2api.orchestrator --private-workspace offline-test staging-
 
 - Verify existing root, current user SID, protected owner/DACL and existing
   database/blob child owner and non-broadening trustees before dispatch.
+- At first provisioning, create the blob directory under the already protected
+  root using ordinary DACL inheritance rather than calling Windows Python
+  3.12.4+ `mkdir(mode=0o700)`, which may explicitly add Administrators and
+  Owner Rights. Native CLI roundtrip tests verify this after reopen.
 - The only database is `controller.sqlite3`; the only blob directory is
   `blobs`. Protected CLI operations derive these rather than trusting
   arbitrary `--db` or `--blob-root` inputs. Reject mixed `--db` and
