@@ -130,6 +130,13 @@ def cleanup_managed_stages(directory: str | Path, *, min_age_seconds: float = 36
     """
     if not isinstance(dry_run, bool):
         raise ValueError("dry_run must be boolean")
+    if dry_run:
+        # A real read-only inspection must not create a persistent lockfile.
+        return {"dry_run": True, "removed": [],
+                "legacy_files_never_deleted": True,
+                "requires_cooperative_writers": True,
+                "inventory": inspect_stages(directory, min_age_seconds=min_age_seconds,
+                                            now=now)}
     with stage_guard(directory) as root:
         examined = inspect_stages(root, min_age_seconds=min_age_seconds, now=now)
         removed = []

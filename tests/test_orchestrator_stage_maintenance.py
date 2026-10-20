@@ -148,3 +148,12 @@ def test_posix_canonical_path_allows_trusted_directory_alias(tmp_path):
     assert package.read("alias-task")["attachments"][0]["size"] == len(
         b"controlled test file"
     )
+
+
+def test_dryrun_does_not_create_lockfile(tmp_path):
+    (tmp_path / ".staged-unknown").write_bytes(b"manual")
+    assert not (tmp_path / ".orchestrator-stage.lock").exists()
+    result = cleanup_managed_stages(tmp_path, min_age_seconds=0)
+    assert result["dry_run"] is True
+    assert not (tmp_path / ".orchestrator-stage.lock").exists()
+    assert (tmp_path / ".staged-unknown").exists()
