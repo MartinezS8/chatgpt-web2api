@@ -140,6 +140,28 @@ class WorkerSchedulerTests(unittest.TestCase):
         self.reg.control('a', throttle_until=0)
         self.assertIsNotNone(self.scheduler.claim_next('a','p'))
 
+    def test_individual_worker_disable_prevents_claims_and_preserves_active_assignment(self):
+        self.worker()
+        self.task(1)
+        self.task(2)
+
+        self.assertTrue(self.reg.set_enabled('a-1', False))
+        self.assertFalse(self.reg.get('a-1')['enabled'])
+        self.assertIsNone(self.scheduler.claim_next('a', 'p'))
+        self.assertEqual(self.store.get('p-t1')['state'], TaskState.QUEUED.value)
+        self.assertEqual(self.store.get('p-t2')['state'], TaskState.QUEUED.value)
+
+        self.assertTrue(self.reg.set_enabled('a-1', True))
+        claim = self.scheduler.claim_next('a', 'p')
+        self.assertIsNotNone(claim)
+        assigned_task = claim['task']['task_id']
+        self.assertTrue(self.reg.set_enabled('a-1', False))
+        self.assertEqual(self.reg.assignments('a')[0]['task_id'], assigned_task)
+        self.assertIsNone(self.scheduler.claim_next('a', 'p'))
+        self.assertEqual(self.store.get(assigned_task)['state'], TaskState.RESERVED.value)
+        self.assertFalse(self.reg.set_enabled('a-1', False))
+        self.assertFalse(self.reg.set_enabled('missing-worker', True))
+
     def test_stale_worker_alert_does_not_release_or_auto_retry(self):
         self.worker()
         self.task()

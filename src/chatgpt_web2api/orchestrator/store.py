@@ -88,6 +88,7 @@ class Store:
         db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         db.row_factory = sqlite3.Row
         try:
+            db.execute("PRAGMA foreign_keys=ON")
             db.execute("PRAGMA busy_timeout=10000")
             db.execute("PRAGMA journal_mode=WAL")
             yield db

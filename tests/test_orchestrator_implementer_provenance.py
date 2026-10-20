@@ -4,7 +4,8 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
-from test_orchestrator_provider_evidence import SHA, STAMP, store as store
+from test_orchestrator_provider_evidence import SHA, STAMP
+from test_orchestrator_provider_evidence import store as store
 from test_orchestrator_task_review_evidence import record, seed
 
 from chatgpt_web2api.orchestrator.implementer_provenance import (
