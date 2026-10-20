@@ -10,7 +10,7 @@ WORKER_COMMANDS = frozenset({
     "worker-capabilities", "register-worker", "list-workers",
     "worker-assignments", "worker-heartbeat", "worker-claim",
     "pause-workers", "resume-workers", "throttle-workers",
-    "scan-workers", "worker-alerts",
+    "scan-workers", "worker-alerts", "enable-worker", "disable-worker",
 })
 WORKER_READ_COMMANDS = frozenset({"list-workers", "worker-assignments", "worker-alerts"})
 
@@ -33,6 +33,9 @@ def configure_worker_commands(commands):
             p.add_argument("--stale-after", type=int, default=300)
         if name == "throttle-workers":
             p.add_argument("--seconds", type=float, required=True)
+    for name in ("enable-worker", "disable-worker"):
+        p = commands.add_parser(name, help="Enable or disable one logical worker; never sends")
+        p.add_argument("--id", required=True)
     p = commands.add_parser("worker-heartbeat")
     p.add_argument("--id", required=True)
     p = commands.add_parser("worker-claim", help="Atomically reserve a sealed mock task; NEVER sends")
@@ -61,6 +64,17 @@ def execute_worker_command(args, store):
         return {"account": args.account, "assignments": registry.assignments(args.account)}
     if args.command == "worker-heartbeat":
         return {"worker_id": args.id, "found": registry.heartbeat(args.id)}
+    if args.command in {"enable-worker", "disable-worker"}:
+        enabled = args.command == "enable-worker"
+        changed = registry.set_enabled(args.id, enabled)
+        worker = registry.get(args.id)
+        return {
+            "worker_id": args.id,
+            "found": worker is not None,
+            "enabled": bool(worker["enabled"]) if worker is not None else None,
+            "changed": changed,
+            "external_actions": False,
+        }
     supervisor = Supervisor(store,registry)
     if args.command == "pause-workers":
         return supervisor.pause(args.account)

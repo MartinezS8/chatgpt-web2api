@@ -151,6 +151,34 @@ class WorkerRegistry:
                              (at, worker_id))
             return cur.rowcount == 1
 
+    def set_enabled(self, worker_id: str, enabled: bool) -> bool:
+        """Enable or disable a logical worker without releasing its assignment.
+
+        Disabling prevents future claims. Any active assignment remains held
+        for explicit recovery/reconciliation; this method does not cancel or
+        retry work. Only mock workers may be enabled in this release.
+        """
+        _identity(worker_id, "worker_id")
+        if not isinstance(enabled, bool):
+            raise ValueError("enabled must be a boolean")
+        with self.store._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT transport, enabled FROM orchestrator_workers WHERE worker_id=?",
+                (worker_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            if enabled and row["transport"] != "mock":
+                raise ValueError("live transports are not authorized in PR-03")
+            if bool(row["enabled"]) == enabled:
+                return False
+            db.execute(
+                "UPDATE orchestrator_workers SET enabled=? WHERE worker_id=?",
+                (int(enabled), worker_id),
+            )
+            return True
+
     def control(self, account_id: str, *, paused: bool | None = None,
                 throttle_until: float | None = None) -> dict:
         _identity(account_id, "account_id")

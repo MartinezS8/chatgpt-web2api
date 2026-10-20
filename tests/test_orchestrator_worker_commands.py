@@ -42,6 +42,25 @@ class TestWorkerCommands(unittest.TestCase):
             self.assertTrue(execute_worker_command(parser.parse_args([
                 "worker-heartbeat", "--id", "wk-1",
             ]), store)["found"])
+            disabled = execute_worker_command(parser.parse_args([
+                "disable-worker", "--id", "wk-1",
+            ]), store)
+            self.assertTrue(disabled["found"])
+            self.assertFalse(disabled["enabled"])
+            self.assertTrue(disabled["changed"])
+            enabled = execute_worker_command(parser.parse_args([
+                "enable-worker", "--id", "wk-1",
+            ]), store)
+            self.assertTrue(enabled["enabled"])
+            self.assertTrue(enabled["changed"])
+            unchanged = execute_worker_command(parser.parse_args([
+                "enable-worker", "--id", "wk-1",
+            ]), store)
+            self.assertFalse(unchanged["changed"])
+            missing = execute_worker_command(parser.parse_args([
+                "disable-worker", "--id", "missing-worker",
+            ]), store)
+            self.assertFalse(missing["found"])
             self.assertEqual(execute_worker_command(parser.parse_args([
                 "worker-assignments", "--account", "acct",
             ]), store)["assignments"], [])
@@ -62,6 +81,10 @@ class TestWorkerCommands(unittest.TestCase):
             self.assertTrue(execute_worker_command(
                 parser.parse_args(common + ["--disabled"]), store
             )["created"])
+            from chatgpt_web2api.orchestrator.worker_registry import WorkerRegistry
+
+            with self.assertRaises(ValueError):
+                WorkerRegistry(store).set_enabled("w", True)
 
 
 def test_existing_cli_dispatches_worker_commands_without_external_actions(tmp_path):
@@ -83,3 +106,7 @@ def test_existing_cli_dispatches_worker_commands_without_external_actions(tmp_pa
     ]))
     assert len(listed["workers"]) == 1
     assert "session_key" not in listed["workers"][0]
+    disabled = execute(parser.parse_args([
+        "--db", str(db), "disable-worker", "--id", "worker-1",
+    ]))
+    assert disabled["found"] is True and disabled["enabled"] is False
