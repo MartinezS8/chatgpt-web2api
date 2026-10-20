@@ -70,8 +70,8 @@ class PrivateStorageContext:
 
 def _check_child_acl(path: Path, sid: str) -> None:
     """Existing SQLite/blob child must not grant any unrelated principal."""
-    if not path.exists():
-        return
+    # The caller already confirmed the child exists using lstat. Do not let
+    # Path.exists() swallow a permission error or a concurrent disappearance.
     reject_reparse_path(
         path, error_message="private workspace child traverses reparse point"
     )

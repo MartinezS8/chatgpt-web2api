@@ -213,3 +213,43 @@ def test_native_existing_workspace_loader_roundtrip():
         assert loaded_again == loaded
     finally:
         shutil.rmtree(created.root)
+
+
+def test_existing_child_acl_rejects_extra_trustee(tmp_path, monkeypatch):
+    import chatgpt_web2api.orchestrator.private_workspace as protected
+
+    child = tmp_path / "controller.sqlite3"
+    child.write_bytes(b"synthetic")
+    sid = "S-1-5-21-1-2-3-1001"
+    monkeypatch.setattr(protected, "read_windows_descriptor", lambda path: {
+        "owner_sid": sid, "aces": [
+            {"sid": sid, "type": 0, "mask": 0x1F01FF},
+            {"sid": "S-1-5-18", "type": 0, "mask": 0x1F01FF},
+            {"sid": "S-1-1-0", "type": 0, "mask": 1},
+        ],
+    })
+    with pytest.raises(PermissionError, match="unexpected access"):
+        protected._check_child_acl(child, sid)
+
+
+def test_existing_child_acl_rejects_wrong_owner(tmp_path, monkeypatch):
+    import chatgpt_web2api.orchestrator.private_workspace as protected
+
+    child = tmp_path / "blobs"
+    child.mkdir()
+    monkeypatch.setattr(protected, "read_windows_descriptor", lambda path: {
+        "owner_sid": "S-1-5-18",
+        "aces": [],
+    })
+    with pytest.raises(PermissionError, match="unexpected owner"):
+        protected._check_child_acl(child, "S-1-5-21-1-2-3-1001")
+
+
+def test_dotdot_escape_is_rejected_before_database_open(private, tmp_path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("synthetic")
+    escape = private.root / ".." / "outside.txt"
+    with pytest.raises(ValueError, match="inside the private workspace"):
+        _run("create-task", "--id", "t", "--project", "p", "--role",
+             "implement", "--prompt-file", str(escape))
+    assert not private.database.exists()
