@@ -5,6 +5,7 @@ cleanup. Historical .staged-* and .sqlite-snapshot-* are never removed.
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 import secrets
@@ -27,6 +28,21 @@ def _local_stage_lock(directory: Path) -> threading.Lock:
 
 _MANAGED = re.compile(r"\.(?:staged|sqlite-snapshot)-v2-[0-9a-f]{32}\Z")
 _LEGACY = (".staged-", ".sqlite-snapshot-")
+
+
+def _validate_times(min_age_seconds: float, now: float | None) -> float:
+    if not math.isfinite(min_age_seconds) or min_age_seconds < 0:
+        raise ValueError("minimum age must be finite and nonnegative")
+    observed = time.time() if now is None else now
+    if not math.isfinite(observed):
+        raise ValueError("inspection time must be finite")
+    return observed
+
+
+def _regular(info: os.stat_result) -> bool:
+    return stat.S_ISREG(info.st_mode) and not (
+        os.name == "nt" and getattr(info, "st_file_attributes", 0) & 0x400
+    )
 
 
 def _safe_directory(root: str | Path) -> Path:
@@ -98,24 +114,29 @@ def create_managed_stage(directory: str | Path, kind: str) -> tuple[int, Path]:
 def inspect_stages(directory: str | Path, *, min_age_seconds: float = 3600,
                    now: float | None = None) -> list[dict]:
     """Read-only inventory. File age alone is NOT evidence of abandonment."""
-    if min_age_seconds < 0:
-        raise ValueError("minimum age must be nonnegative")
+    now = _validate_times(min_age_seconds, now)
     directory = _safe_directory(directory)
-    now = time.time() if now is None else now
     result = []
     for path in sorted(directory.iterdir()):
         if not path.name.startswith(_LEGACY):
             continue
-        info = path.lstat()
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            # Inventory races with publication/removal; absence is not an error.
+            continue
         managed = _MANAGED.fullmatch(path.name) is not None
-        eligible = managed and stat.S_ISREG(info.st_mode) and not path.is_symlink()
-        if os.name == "nt" and getattr(info, "st_file_attributes", 0) & 0x400:
-            eligible = False
+        regular = _regular(info)
+        eligible = managed and regular
         result.append({"name": path.name,
                        "kind": "managed_v2" if managed else "legacy_unmanaged",
+                       "size_bytes": info.st_size, "mtime_ns": info.st_mtime_ns,
+                       "entry_type": "regular_file" if regular else "non_regular",
+                       "disposition": "cooperative_locked_review" if eligible
+                       else "manual_review_only",
                        "age_seconds": max(0.0, now - info.st_mtime),
                        "eligible_for_locked_review": bool(
-                           eligible and now - info.st_mtime >= min_age_seconds
+                           eligible and max(0.0, now - info.st_mtime) >= min_age_seconds
                        ), "deleted": False})
     return result
 
@@ -130,6 +151,7 @@ def cleanup_managed_stages(directory: str | Path, *, min_age_seconds: float = 36
     """
     if not isinstance(dry_run, bool):
         raise ValueError("dry_run must be boolean")
+    now = _validate_times(min_age_seconds, now)
     if dry_run:
         # A real read-only inspection must not create a persistent lockfile.
         return {"dry_run": True, "removed": [],
@@ -144,15 +166,23 @@ def cleanup_managed_stages(directory: str | Path, *, min_age_seconds: float = 36
             if not item["eligible_for_locked_review"] or dry_run:
                 continue
             path = root / item["name"]
-            before = path.lstat()
-            if not stat.S_ISREG(before.st_mode) or path.is_symlink():
+            try:
+                before = path.lstat()
+                after = path.lstat()
+            except FileNotFoundError:
                 continue
-            after = path.lstat()
+            if not _regular(before) or not _regular(after):
+                continue
+            if max(0.0, now - after.st_mtime) < min_age_seconds:
+                continue
             if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
                 after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
             ):
                 continue
-            path.unlink()
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                continue
             item["deleted"] = True
             removed.append(path.name)
         return {"dry_run": dry_run, "removed": removed,

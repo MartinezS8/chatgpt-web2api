@@ -62,11 +62,11 @@ class TaskPackages:
         """
         h = hashlib.sha256()
         with stage_guard(self.blob_root):
+            reject_reparse_path(
+                path, error_message="attachment path cannot traverse a reparse point"
+            )
             fd, name = create_managed_stage(self.blob_root, "staged")
             try:
-                reject_reparse_path(
-                    path, error_message="attachment path cannot traverse a reparse point"
-                )
                 with os.fdopen(fd, "wb") as target, path.open("rb") as source:
                     opened = os.fstat(source.fileno())
                     identity = ("st_dev", "st_ino", "st_size", "st_mtime_ns")
