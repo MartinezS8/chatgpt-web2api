@@ -62,6 +62,12 @@ def reject_reparse_path(path: str | Path, *, error_message: str) -> None:
     FILE_ATTRIBUTE_REPARSE_POINT bit is 0x0400.
     """
     absolute = Path(os.path.abspath(Path(path).expanduser()))
+    if os.name != "nt":
+        # macOS exposes many trusted temporary paths via /var -> /private/var.
+        # Canonicalize these POSIX aliases before checking components. The
+        # caller still verifies allowed_root containment on resolved paths,
+        # and direct attachment symlinks are refused.
+        absolute = absolute.resolve(strict=False)
     current = Path(absolute.anchor)
     for part in absolute.parts[1:]:
         current = current / part

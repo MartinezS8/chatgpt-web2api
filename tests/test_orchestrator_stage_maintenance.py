@@ -129,3 +129,22 @@ def test_new_stage_name_is_recognized_and_requires_explicit_cleanup(tmp_path, ki
 def test_bad_cleanup_age_is_rejected(tmp_path):
     with pytest.raises(ValueError):
         cleanup_managed_stages(tmp_path, min_age_seconds=-1)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX canonical symlink alias check")
+def test_posix_canonical_path_allows_trusted_directory_alias(tmp_path):
+    """macOS /var -> /private/var must not break ordinary temp-path snapshots."""
+    target = tmp_path / "real_root"
+    target.mkdir()
+    alias = tmp_path / "alias_root"
+    alias.symlink_to(target, target_is_directory=True)
+    store = Store(tmp_path / "task.sqlite3")
+    store.create(TaskSpec("alias-task", "project", "implement", "hello"))
+    package = TaskPackages(store, alias / "blobs")
+    source = alias / "source.txt"
+    source.write_bytes(b"controlled test file")
+    result = package.seal("alias-task", "hello", [source], allowed_root=alias)
+    assert result["created"] is True
+    assert package.read("alias-task")["attachments"][0]["size"] == len(
+        b"controlled test file"
+    )

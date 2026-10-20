@@ -17,6 +17,10 @@ The new V2 protocol assumes a trusted, account-private staging directory. An att
 - `cleanup_managed_stages` first takes the exclusive lock, then rechecks each candidate's regular-file identity. Only known V2 names meeting an age threshold can be unlinked. Legacy `.staged-*` and `.sqlite-snapshot-*` stay untouched indefinitely for manual reconciliation. Default is `dry_run=True`.
 - CLI: `python -m chatgpt_web2api.orchestrator staging-audit --root <EXPLICIT-LOCAL-DIR>` lists candidates. To opt into V2-only cleanup, add `--delete-managed-v2 --older-than-hours 24`; deletion requires at least one hour and the cooperative lock. **Never** run on untrusted or multi-user writable storage.
 
+## macOS canonical POSIX paths
+
+Initial exact-SHA [CI run 39435309531](https://github.com/MartinezS8/chatgpt-web2api/actions/runs/39435309531) exposed legitimate macOS temp aliases such as `/var -> /private/var` being rejected by the inherited reparse component validation. The fix canonicalizes the path **only on POSIX** before ancestor checks and retains strict reparse/junction checking on Windows. Attachment sources are still checked against the resolved `allowed_root`, and direct source symlinks remain rejected. The new POSIX alias regression covers an explicitly controlled directory, not malicious racing writes.
+
 ## Attachment identity check
 
 `TaskPackages.seal` retains the source file's initial `os.stat_result`. At fd open, the code compares `fstat` device/inode, size, and nanosecond modification time. The code compares the fd again after the read. A source swap between preflight and open fails rather than silently snapshotting another inode. The existing allow-root and reparse checks remain.
