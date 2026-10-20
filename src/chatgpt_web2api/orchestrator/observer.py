@@ -11,7 +11,11 @@ from pathlib import Path
 
 
 class Observer:
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, *, storage_policy=None):
+        self.storage_policy = storage_policy
+        if storage_policy is not None:
+            from .storage_policy import checked_policy
+            checked_policy(storage_policy).database(db_path)
         self.path = Path(db_path).expanduser().resolve()
         if not self.path.is_file():
             raise FileNotFoundError("controller database does not exist")
@@ -19,6 +23,8 @@ class Observer:
     def _read(self, query: str, params: tuple = (), *, limit: int = 100) -> list[dict]:
         """Only module-authored SELECT statements; no caller-provided SQL."""
         uri = self.path.as_uri() + "?mode=ro"
+        if self.storage_policy is not None:
+            self.storage_policy.database(self.path)
         # sqlite3.Connection context manager commits/rolls back but does NOT
         # close the connection. The observer is polled repeatedly; close it.
         with closing(sqlite3.connect(uri, uri=True, timeout=5.0)) as db:

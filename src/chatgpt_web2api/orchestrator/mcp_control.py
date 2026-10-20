@@ -54,11 +54,11 @@ def dispatch_observer(observer: Observer, name: str, arguments: dict | None = No
     raise ValueError("forbidden MCP operation")
 
 
-def create_server(database: str | Path):
+def create_server(database: str | Path, *, storage_policy=None):
     from mcp import types as mcp_types
     from mcp.server import Server
 
-    observer=Observer(database)
+    observer=Observer(database, storage_policy=storage_policy)
     server=Server("chatgpt-orchestrator-observer")
 
     @server.list_tools()
@@ -79,9 +79,9 @@ def create_server(database: str | Path):
     return server
 
 
-async def run_server(database: str | Path):
+async def run_server(database: str | Path, *, storage_policy=None):
     from mcp.server.stdio import stdio_server
-    server=create_server(database)
+    server=create_server(database, storage_policy=storage_policy)
     async with stdio_server() as (read,write):
         await server.run(read,write,server.create_initialization_options(),raise_exceptions=True)
 
@@ -89,7 +89,15 @@ async def run_server(database: str | Path):
 def main():
     parser=argparse.ArgumentParser(description="Read-only Codex orchestrator MCP stdio observer")
     parser.add_argument("--db",default=os.environ.get("CHATGPT_ORCHESTRATOR_DB"))
+    parser.add_argument("--private-workspace")
     args=parser.parse_args()
+    if args.private_workspace is not None:
+        if args.db:
+            parser.error("--private-workspace cannot be combined with --db or DB environment")
+        from .storage_policy import PrivateStoragePolicy
+        policy = PrivateStoragePolicy.open(args.private_workspace)
+        asyncio.run(run_server(policy.context.database, storage_policy=policy))
+        return
     if not args.db:
         parser.error("--db or CHATGPT_ORCHESTRATOR_DB required")
     asyncio.run(run_server(args.db))

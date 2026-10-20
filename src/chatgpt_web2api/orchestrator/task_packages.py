@@ -36,6 +36,8 @@ def _digest(data: bytes) -> str:
 class TaskPackages:
     def __init__(self, store: Store, blob_root: str | Path):
         self.store = store
+        self.storage_policy = store.storage_policy
+        self._check_storage(blob_root)
         root = Path(blob_root).expanduser()
         if root.is_symlink():
             raise ValueError("artifact root cannot be a symbolic link")
@@ -53,6 +55,15 @@ class TaskPackages:
                 package_sha256 TEXT NOT NULL, prompt TEXT NOT NULL,
                 attachments_json TEXT NOT NULL, sealed_at REAL NOT NULL)""")
 
+    def _check_storage(self, blob_root=None):
+        if self.store.storage_policy is not self.storage_policy:
+            raise ValueError("package storage mode changed")
+        if self.storage_policy is not None:
+            from .storage_policy import checked_policy
+            policy = checked_policy(self.storage_policy)
+            policy.database(self.store.path)
+            policy.blobs(self.blob_root if blob_root is None else blob_root)
+
     def _store_blob(self, path: Path, initial: os.stat_result) -> dict:
         """Snapshot via an inode-checked source fd and cooperative stage lock.
 
@@ -61,7 +72,10 @@ class TaskPackages:
         by another principal: callers must use a private allowed_root.
         """
         h = hashlib.sha256()
-        with stage_guard(self.blob_root):
+        self._check_storage()
+        if self.storage_policy is not None:
+            self.storage_policy.source(path)
+        with stage_guard(self.blob_root, storage_policy=self.storage_policy):
             reject_reparse_path(
                 path, error_message="attachment path cannot traverse a reparse point"
             )
@@ -90,6 +104,7 @@ class TaskPackages:
                     target.flush()
                     os.fsync(target.fileno())
                 digest = h.hexdigest()
+                self._check_storage()
                 dest = self.blob_root / digest
                 if dest.is_symlink():
                     raise ValueError("content-addressed target is symbolic link")
@@ -109,6 +124,12 @@ class TaskPackages:
 
     def seal(self, task_id: str, prompt: str, attachments: list[str | Path] | tuple[str | Path, ...] = (),
              *, allowed_root: str | Path | None = None) -> dict:
+        self._check_storage()
+        if self.storage_policy is not None:
+            if allowed_root is not None:
+                self.storage_policy.source(allowed_root, directory=True)
+            for attachment in attachments:
+                self.storage_policy.source(attachment)
         task = self.store.get(task_id)
         if task is None:
             raise ValueError("task must exist before sealing package")
@@ -174,6 +195,7 @@ class TaskPackages:
         return {**manifest, "package_sha256": sha, "created": True}
 
     def read(self, task_id: str, *, verify_blobs: bool = True) -> dict:
+        self._check_storage()
         with self.store._connect() as db:
             p = db.execute("SELECT * FROM orchestrator_task_packages WHERE task_id=?", (task_id,)).fetchone()
             if p is None:
@@ -190,6 +212,8 @@ class TaskPackages:
         if verify_blobs:
             for attachment in records:
                 blob = self.blob_root / attachment["sha256"]
+                if self.storage_policy is not None:
+                    self.storage_policy.source(blob)
                 if blob.is_symlink() or not blob.is_file() or blob.stat().st_size != attachment["size"]:
                     raise ValueError("missing/changed attachment snapshot")
                 with blob.open("rb") as f:

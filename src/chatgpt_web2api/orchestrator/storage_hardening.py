@@ -165,13 +165,16 @@ def create_private_windows_workspace(label: str) -> PrivateWorkspace:
                             blobs=root / "blobs")
 
 
-def snapshot_sqlite_same_directory(database: str | Path, filename: str) -> Path:
+def snapshot_sqlite_same_directory(database: str | Path, filename: str, *, storage_policy=None) -> Path:
     """Create a no-clobber SQLite online backup alongside the source database.
 
     Backups must stay under the same OS-protected directory as the original
     file. Caller is responsible for provisioning/access-checking that folder.
     A hard-link publish fails instead of overwriting another backup.
     """
+    if storage_policy is not None:
+        from .storage_policy import checked_policy
+        checked_policy(storage_policy).database(database)
     if not isinstance(filename, str) or not re.fullmatch(
         r"[A-Za-z0-9][A-Za-z0-9_.-]{0,100}\.sqlite3", filename
     ):
@@ -194,7 +197,7 @@ def snapshot_sqlite_same_directory(database: str | Path, filename: str) -> Path:
     # The writer holds the cooperative directory lock until successful
     # publication or deletion. Recovery can only remove V2 stages after this
     # process has exited and the OS has released its lock.
-    with stage_guard(parent):
+    with stage_guard(parent, storage_policy=storage_policy):
         fd, stage = create_managed_stage(parent, "sqlite-snapshot")
         os.close(fd)
         try:
@@ -211,6 +214,8 @@ def snapshot_sqlite_same_directory(database: str | Path, filename: str) -> Path:
             with stage.open("r+b") as handle:
                 os.fsync(handle.fileno())
             # Same-volume, no-clobber publish; no external provider actions.
+            if storage_policy is not None:
+                storage_policy.database(database)
             os.link(stage, dest)
             return dest
         finally:

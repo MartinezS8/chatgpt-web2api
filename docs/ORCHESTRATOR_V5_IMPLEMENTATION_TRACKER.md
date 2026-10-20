@@ -421,6 +421,14 @@ See [PR-34 staging recovery and path-race limitations](ORCHESTRATOR_PR34_STAGE_R
 
 ## Non-negotiable product constraints
 
+Protected storage boundary follow-up: see
+[policy contract](ORCHESTRATOR_PROTECTED_STORAGE_BOUNDARY.md). Explicit native
+policy now propagates to library Store/Packages, mock services, staging/backup
+and the observer MCP route. `Store.storage_mode` distinguishes legacy from
+protected-private. Hostile concurrent path replacement and effective
+second-user ACL denial remain open acceptance gates; no real-worker readiness
+is implied by branch diagnostics.
+
 - Five **logical** slots are not a promise of five simultaneously available Plus webchat generations.
 - A registered resource alias is an assertion, not provider permission; never allow a direct external write based on it alone.
 - Exactly-once delivery cannot be asserted for a remote UI with no idempotency key; uncertain delivery stays quarantined.
