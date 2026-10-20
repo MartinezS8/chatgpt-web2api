@@ -15,6 +15,7 @@ from pathlib import Path
 
 from .observer_commands import OBS_COMMANDS, configure_observer_commands, execute_observer_command
 from .outbox import DispatchOutbox
+from .private_workspace import load_private_workspace
 from .resource_registry import ResourceIdentity, ResourceRegistry
 from .stage_maintenance import cleanup_managed_stages
 from .storage_hardening import create_private_windows_workspace, snapshot_sqlite_same_directory
@@ -36,6 +37,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--db", default=os.environ.get("CHATGPT_ORCHESTRATOR_DB"),
                    help="Explicit path to the local SQLite database (or CHATGPT_ORCHESTRATOR_DB)")
     p.add_argument("--json", action="store_true", help="Machine-readable JSON response")
+    p.add_argument("--private-workspace", default=None,
+                   help="Reopen existing ACL-verified Windows workspace by label; cannot combine with --db")
     commands = p.add_subparsers(dest="command", required=True)
     commands.add_parser("capabilities", help="Display supported operations and safety boundaries")
     s = commands.add_parser("init-private-workspace",
@@ -107,6 +110,8 @@ def build_parser() -> argparse.ArgumentParser:
 def _capabilities() -> dict:
     return {
         "task_store": "sqlite-wal", "max_worker_slots": 5,
+        "private_workspace_cli": "explicit-windows-label-with-dacl-readback",
+        "legacy_db_paths_private_assurance": False,
         "commands": ["capabilities", "init-private-workspace", "backup-local-db",
                      "staging-audit",
                      "status", "list-tasks", "task", "events",
@@ -146,6 +151,13 @@ def execute(args: argparse.Namespace) -> dict:
         return capabilities()
     if args.command == "capabilities":
         return _capabilities()
+    private = None
+    if getattr(args, "private_workspace", None) is not None:
+        if args.db:
+            raise ValueError("--private-workspace cannot be combined with --db or CHATGPT_ORCHESTRATOR_DB")
+        if args.command == "init-private-workspace":
+            raise ValueError("use --label alone when provisioning a new private workspace")
+        private = load_private_workspace(args.private_workspace)
     if args.command == "init-private-workspace":
         workspace = create_private_windows_workspace(args.label)
         store = Store(workspace.database)
@@ -160,17 +172,30 @@ def execute(args: argparse.Namespace) -> dict:
             raise ValueError("invalid staging audit age in hours")
         if args.delete_managed_v2 and args.older_than_hours < 1:
             raise ValueError("managed V2 deletion requires minimum age of one hour")
+        root = private.require_staging_root(args.root) if private else args.root
         result = cleanup_managed_stages(
-            args.root, min_age_seconds=args.older_than_hours * 3600,
+            root, min_age_seconds=args.older_than_hours * 3600,
             dry_run=not args.delete_managed_v2
         )
         return {**result, "remote_actions_permitted": False}
-    if not args.db:
-        raise ValueError("--db or CHATGPT_ORCHESTRATOR_DB must be set")
+    if private is None and not args.db:
+        raise ValueError("--db, CHATGPT_ORCHESTRATOR_DB or --private-workspace must be set")
     if args.command == "backup-local-db":
-        location = snapshot_sqlite_same_directory(args.db, args.filename)
+        location = snapshot_sqlite_same_directory(private.database if private else args.db, args.filename)
         return {"backup": str(location), "remote_actions_permitted": False}
-    db_path = Path(args.db).expanduser().resolve()
+    db_path = private.database if private else Path(args.db).expanduser().resolve()
+    if private:
+        if args.command in {"create-task", "seal-task"}:
+            private.require_path(args.prompt_file)
+        if args.command == "seal-task":
+            for attachment in args.attachment:
+                private.require_path(attachment)
+            if args.allowed_root is not None:
+                private.require_path(args.allowed_root, directory=True)
+            elif args.attachment:
+                args.allowed_root = str(private.root)
+        if args.command == "worker-claim":
+            private.require_blob_root(args.blob_root)
     if args.command in OBS_COMMANDS:
         return execute_observer_command(args, db_path)
     if args.command in WORKER_READ_COMMANDS and not db_path.is_file():
@@ -186,7 +211,7 @@ def execute(args: argparse.Namespace) -> dict:
     if args.command in WORKER_COMMANDS:
         return execute_worker_command(args, store)
     if args.command in {"seal-task", "task-package", "delivery-events", "ack-delivery-event", "reconcile-dispatch"}:
-        packages = TaskPackages(store, db_path.parent / "orchestrator_blobs")
+        packages = TaskPackages(store, private.blobs if private else db_path.parent / "orchestrator_blobs")
         outbox = DispatchOutbox(store, packages)
         if args.command == "seal-task":
             file = Path(args.prompt_file).expanduser().resolve(strict=True)
