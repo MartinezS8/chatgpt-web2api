@@ -9,11 +9,22 @@ import os
 import re
 import secrets
 import stat
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
 _LOCK_NAME = ".orchestrator-stage.lock"
+_LOCAL_GUARD = threading.Lock()
+_LOCAL_LOCKS: dict[str, threading.Lock] = {}
+
+
+def _local_stage_lock(directory: Path) -> threading.Lock:
+    key = os.path.normcase(os.path.abspath(directory))
+    with _LOCAL_GUARD:
+        return _LOCAL_LOCKS.setdefault(key, threading.Lock())
+
+
 _MANAGED = re.compile(r"\.(?:staged|sqlite-snapshot)-v2-[0-9a-f]{32}\Z")
 _LEGACY = (".staged-", ".sqlite-snapshot-")
 
@@ -36,35 +47,37 @@ def stage_guard(directory: str | Path):
     This protocol only protects cooperating V2 writers in a controlled root.
     """
     directory = _safe_directory(directory)
-    path = directory / _LOCK_NAME
-    if path.is_symlink():
-        raise ValueError("staging lock cannot be a symlink")
-    flags = os.O_RDWR | os.O_CREAT
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    fd = os.open(path, flags, 0o600)
-    try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise ValueError("staging lock is not a regular file")
-        if os.name == "nt":
-            import msvcrt
-
-            os.lseek(fd, 0, os.SEEK_SET)
-            msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
-        else:
-            import fcntl
-
-            fcntl.flock(fd, fcntl.LOCK_EX)
+    # Protect threads in the same process as well as separate processes.
+    with _local_stage_lock(directory):
+        path = directory / _LOCK_NAME
+        if path.is_symlink():
+            raise ValueError("staging lock cannot be a symlink")
+        flags = os.O_RDWR | os.O_CREAT
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd = os.open(path, flags, 0o600)
         try:
-            yield directory
-        finally:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise ValueError("staging lock is not a regular file")
             if os.name == "nt":
+                import msvcrt
+
                 os.lseek(fd, 0, os.SEEK_SET)
-                msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
             else:
-                fcntl.flock(fd, fcntl.LOCK_UN)
-    finally:
-        os.close(fd)
+                import fcntl
+
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            try:
+                yield directory
+            finally:
+                if os.name == "nt":
+                    os.lseek(fd, 0, os.SEEK_SET)
+                    msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+                else:
+                    fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
 
 
 def create_managed_stage(directory: str | Path, kind: str) -> tuple[int, Path]:
