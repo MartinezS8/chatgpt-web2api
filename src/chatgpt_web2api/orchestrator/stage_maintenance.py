@@ -47,6 +47,13 @@ def _regular(info: os.stat_result) -> bool:
 
 def _safe_directory(root: str | Path) -> Path:
     directory = Path(root).expanduser()
+    if os.name == "nt":
+        # Reject ancestor junctions too. This observation does not pin paths
+        # against subsequent hostile replacement; private parents are required.
+        absolute = Path(os.path.abspath(directory))
+        for component in (absolute, *absolute.parents):
+            if getattr(component.lstat(), "st_file_attributes", 0) & 0x400:
+                raise ValueError("staging root traverses a Windows reparse point")
     info = directory.lstat()
     if directory.is_symlink() or not stat.S_ISDIR(info.st_mode):
         raise ValueError("staging root must be an existing real directory")
@@ -68,6 +75,11 @@ def stage_guard(directory: str | Path):
         path = directory / _LOCK_NAME
         if path.is_symlink():
             raise ValueError("staging lock cannot be a symlink")
+        try:
+            if not _regular(path.lstat()):
+                raise ValueError("staging lock is not a regular file")
+        except FileNotFoundError:
+            pass
         flags = os.O_RDWR | os.O_CREAT
         if hasattr(os, "O_NOFOLLOW"):
             flags |= os.O_NOFOLLOW
