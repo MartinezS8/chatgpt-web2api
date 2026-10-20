@@ -53,14 +53,40 @@ def acl_commands(path: Path, sid: str) -> tuple[list[str], ...]:
     )
 
 
+def reject_reparse_path(path: str | Path, *, error_message: str) -> None:
+    """Reject symbolic links and reparse points in any existing path component.
+
+    Python 3.11/3.12 report a Windows junction through ``st_file_attributes``
+    but do not consistently expose ``Path.is_symlink()`` for it. The Windows
+    FILE_ATTRIBUTE_REPARSE_POINT bit is 0x0400.
+    """
+    absolute = Path(os.path.abspath(Path(path).expanduser()))
+    current = Path(absolute.anchor)
+    for part in absolute.parts[1:]:
+        current = current / part
+        try:
+            info = current.lstat()
+        except FileNotFoundError:
+            break
+        is_reparse_point = (
+            os.name == "nt"
+            and bool(getattr(info, "st_file_attributes", 0) & 0x0400)
+        )
+        if current.is_symlink() or is_reparse_point:
+            raise ValueError(error_message)
+
+
 def _reject_reparse(path: Path) -> None:
     if path.is_symlink():
         raise ValueError("workspace path must not be a symlink")
     info = path.lstat()
     if info.st_mode and not stat.S_ISDIR(info.st_mode):
         raise ValueError("workspace path is not a directory")
-    if getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0):
+    if os.name == "nt" and getattr(info, "st_file_attributes", 0) & 0x0400:
         raise ValueError("workspace path must not be a Windows reparse point")
+    reject_reparse_path(
+        path, error_message="workspace path must not traverse a reparse point"
+    )
 
 
 def create_private_windows_workspace(label: str) -> PrivateWorkspace:
@@ -78,6 +104,9 @@ def create_private_windows_workspace(label: str) -> PrivateWorkspace:
     if not local:
         raise OSError("LOCALAPPDATA is unavailable")
     supplied_local = Path(local).expanduser()
+    reject_reparse_path(
+        supplied_local, error_message="LOCALAPPDATA must not traverse a reparse point"
+    )
     _reject_reparse(supplied_local)
     base = supplied_local.resolve(strict=True)
     _reject_reparse(base)
@@ -106,7 +135,17 @@ def create_private_windows_workspace(label: str) -> PrivateWorkspace:
         try:
             root.rmdir()
         except OSError:
-            pass
+            # Removing inheritance can leave an empty directory with no ACE
+            # that permits deletion. Restore the parent's ACL only to remove
+            # this new, not-yet-populated directory; never reuse it on retry.
+            try:
+                subprocess.run(
+                    ["icacls.exe", str(root), "/inheritance:e"],
+                    capture_output=True, text=True, timeout=15, check=True,
+                )
+                root.rmdir()
+            except (OSError, subprocess.SubprocessError):
+                pass
         raise
     return PrivateWorkspace(root=root, database=root / "controller.sqlite3",
                             blobs=root / "blobs")
@@ -126,6 +165,9 @@ def snapshot_sqlite_same_directory(database: str | Path, filename: str) -> Path:
     supplied = Path(database).expanduser()
     if supplied.is_symlink():
         raise ValueError("source database cannot be a symbolic link")
+    reject_reparse_path(
+        supplied, error_message="database path cannot traverse a reparse point"
+    )
     src = supplied.resolve(strict=True)
     if not src.is_file():
         raise ValueError("source must be an existing regular SQLite file")

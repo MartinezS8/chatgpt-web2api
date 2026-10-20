@@ -6,10 +6,13 @@ import sqlite3
 import subprocess
 import sys
 from contextlib import closing
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from chatgpt_web2api.orchestrator.storage_hardening import (
+    _reject_reparse,
     acl_commands,
     create_private_windows_workspace,
     parse_current_user_sid,
@@ -81,6 +84,113 @@ def test_future_unknown_schema_is_rejected_without_downgrade(tmp_path):
         Store(path)
     with closing(sqlite3.connect(path)) as db:
         assert db.execute("SELECT version FROM orchestrator_schema_versions").fetchone()[0] == 99
+
+
+def test_future_unknown_schema_is_rejected_without_changing_database(tmp_path):
+    path = tmp_path / "future-delete-journal.sqlite3"
+    Store(path)
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("PRAGMA journal_mode=DELETE")
+        db.execute("UPDATE orchestrator_schema_versions SET version=99")
+    before = path.read_bytes()
+
+    with pytest.raises(ValueError, match="unsupported task-store schema"):
+        Store(path)
+
+    assert path.read_bytes() == before
+    with closing(sqlite3.connect(path)) as db:
+        assert db.execute("PRAGMA journal_mode").fetchone()[0] == "delete"
+        assert db.execute("SELECT version FROM orchestrator_schema_versions").fetchone()[0] == 99
+
+
+@pytest.mark.parametrize(
+    "missing_column",
+    ("claim_token", "claim_version", "lease_until", "reviewer_ref", "approved_by"),
+)
+def test_version_2_missing_required_column_is_rejected_without_repair(
+    tmp_path, missing_column
+):
+    path = tmp_path / f"v2-missing-{missing_column}.sqlite3"
+    _legacy_db(path)
+    declarations = {
+        "claim_token": "TEXT",
+        "claim_version": "INTEGER NOT NULL DEFAULT 0",
+        "lease_until": "REAL",
+        "reviewer_ref": "TEXT",
+        "approved_by": "TEXT",
+    }
+    with closing(sqlite3.connect(path)) as db, db:
+        for name, declaration in declarations.items():
+            if name != missing_column:
+                db.execute(f"ALTER TABLE tasks ADD COLUMN {name} {declaration}")
+        db.execute("""CREATE TABLE orchestrator_schema_versions (
+            component TEXT PRIMARY KEY, version INTEGER NOT NULL, updated_at REAL NOT NULL)""")
+        db.execute("INSERT INTO orchestrator_schema_versions VALUES ('task-store',2,0)")
+
+    with closing(sqlite3.connect(path)) as db:
+        before_columns = {column[1] for column in db.execute("PRAGMA table_info(tasks)")}
+    with pytest.raises(ValueError, match="missing mandatory columns"):
+        Store(path)
+    with closing(sqlite3.connect(path)) as db:
+        after_columns = {column[1] for column in db.execute("PRAGMA table_info(tasks)")}
+        assert after_columns == before_columns
+        assert db.execute("SELECT version FROM orchestrator_schema_versions").fetchone()[0] == 2
+        assert db.execute("""SELECT 1 FROM sqlite_master WHERE name='ix_tasks_project_state'""").fetchone() is None
+
+
+def test_unversioned_partial_claim_schema_quarantines_active_owner(tmp_path):
+    path = tmp_path / "partial-claim.sqlite3"
+    _legacy_db(path)
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("ALTER TABLE tasks ADD COLUMN claim_token TEXT")
+
+    store = Store(path)
+    task = store.get("legacy")
+    assert task["state"] == "needs_human"
+    assert task["claim_version"] == 0
+    assert task["lease_until"] is None
+    assert task["slot"] == 1
+
+
+@pytest.mark.parametrize(
+    ("claim_token", "claim_version", "lease_until"),
+    ((None, 1, 10_000.0), ("legacy-token", 0, 10_000.0),
+     ("legacy-token", 1, None)),
+)
+def test_unversioned_invalid_claim_values_quarantine_active_owner(
+    tmp_path, claim_token, claim_version, lease_until
+):
+    path = tmp_path / "invalid-claim-values.sqlite3"
+    _legacy_db(path)
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("ALTER TABLE tasks ADD COLUMN claim_token TEXT")
+        db.execute("ALTER TABLE tasks ADD COLUMN claim_version INTEGER NOT NULL DEFAULT 0")
+        db.execute("ALTER TABLE tasks ADD COLUMN lease_until REAL")
+        db.execute("ALTER TABLE tasks ADD COLUMN reviewer_ref TEXT")
+        db.execute("ALTER TABLE tasks ADD COLUMN approved_by TEXT")
+        db.execute("""UPDATE tasks SET claim_token=?,claim_version=?,lease_until=?
+                     WHERE task_id='legacy'""",
+                   (claim_token, claim_version, lease_until))
+
+    task = Store(path).get("legacy")
+    assert task["state"] == "needs_human"
+    assert task["claim_version"] == claim_version
+    assert task["lease_until"] is None
+
+
+def test_version_2_active_task_without_claim_fencing_is_rejected(tmp_path):
+    path = tmp_path / "v2-active-without-claim.sqlite3"
+    store = Store(path)
+    store.create(TaskSpec("active", "project", "implement", "synthetic"))
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("""UPDATE tasks SET state='reserved',slot=1,claim_token=NULL,
+                     claim_version=0,lease_until=NULL WHERE task_id='active'""")
+    before = path.read_bytes()
+
+    with pytest.raises(ValueError, match="without valid claim ownership"):
+        Store(path)
+
+    assert path.read_bytes() == before
 
 
 def test_legacy_orphan_fk_is_detected_before_migration(tmp_path):
@@ -179,6 +289,59 @@ def test_windows_sid_csv_and_shell_free_icacls_arguments(tmp_path):
 def test_windows_workspace_name_rejection_precedes_mutation():
     with pytest.raises(ValueError, match="invalid private workspace"):
         create_private_windows_workspace("../escape")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires native Windows ACL commands")
+def test_partial_windows_acl_failure_removes_new_workspace(tmp_path, monkeypatch):
+    import chatgpt_web2api.orchestrator.storage_hardening as storage_hardening
+
+    local = tmp_path / "local-app-data"
+    local.mkdir()
+    monkeypatch.setenv("LOCALAPPDATA", str(local))
+    real_run = subprocess.run
+
+    def fail_grant(argv, *args, **kwargs):
+        if argv[0] == "icacls.exe" and "/grant:r" in argv:
+            raise subprocess.CalledProcessError(1, argv)
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(storage_hardening.subprocess, "run", fail_grant)
+    with pytest.raises(subprocess.CalledProcessError):
+        create_private_windows_workspace("partial-acl-failure")
+
+    assert not (local / "chatgpt-web2api" / "partial-acl-failure").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="requires Windows reparse-point attributes")
+def test_windows_junction_attributes_are_rejected_in_storage_paths(tmp_path, monkeypatch):
+    junction = tmp_path / "junction"
+    junction.mkdir()
+    database = junction / "state.sqlite3"
+    Store(database)
+    store = Store(tmp_path / "other.sqlite3")
+    real_lstat = Path.lstat
+    real_is_symlink = Path.is_symlink
+
+    def junction_lstat(path):
+        info = real_lstat(path)
+        if path == junction:
+            return SimpleNamespace(st_mode=info.st_mode, st_file_attributes=0x410)
+        return info
+
+    def junction_is_symlink(path):
+        return False if path == junction else real_is_symlink(path)
+
+    monkeypatch.setattr(Path, "lstat", junction_lstat)
+    monkeypatch.setattr(Path, "is_symlink", junction_is_symlink)
+
+    with pytest.raises(ValueError, match="Windows reparse point"):
+        _reject_reparse(junction)
+    with pytest.raises(ValueError, match="database path cannot traverse a reparse point"):
+        snapshot_sqlite_same_directory(database, "through-junction.sqlite3")
+    with pytest.raises(ValueError, match="artifact root cannot traverse a reparse point"):
+        TaskPackages(store, junction / "blobs")
+    assert not (junction / "through-junction.sqlite3").exists()
+    assert not (junction / "blobs").exists()
 
 
 def test_cli_explicit_private_workspace_uses_no_remote_transport(tmp_path, monkeypatch):

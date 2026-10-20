@@ -35,6 +35,18 @@ ACTIVE = (TaskState.RESERVED.value, TaskState.DISPATCHING.value,
           TaskState.RESULT_RECEIVED.value, TaskState.VERIFIED.value,
           TaskState.NEEDS_HUMAN.value)
 
+_TASK_OWNERSHIP_COLUMNS = frozenset({"claim_token", "claim_version", "lease_until"})
+_V2_REQUIRED_TASK_COLUMNS = frozenset({
+    "task_id", "project_id", "role", "prompt_sha", "dependencies", "write_scopes",
+    "baseline_sha", "review_of", "state", "slot", "conversation_id", "delivery_id",
+    "evidence_ref", "error", "updated_at", "claim_token", "claim_version",
+    "lease_until", "reviewer_ref", "approved_by",
+})
+_CLAIMED_STATES = (
+    TaskState.RESERVED.value, TaskState.DISPATCHING.value, TaskState.IN_PROGRESS.value,
+    TaskState.UNKNOWN_DELIVERY.value, TaskState.RESULT_RECEIVED.value, TaskState.VERIFIED.value,
+)
+
 
 @dataclass(frozen=True)
 class TaskSpec:
@@ -84,13 +96,14 @@ class Store:
         self._initialize()
 
     @contextmanager
-    def _connect(self):
+    def _connect(self, *, set_wal: bool = True):
         db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         db.row_factory = sqlite3.Row
         try:
             db.execute("PRAGMA foreign_keys=ON")
             db.execute("PRAGMA busy_timeout=10000")
-            db.execute("PRAGMA journal_mode=WAL")
+            if set_wal:
+                db.execute("PRAGMA journal_mode=WAL")
             yield db
             if db.in_transaction:
                 db.commit()
@@ -108,7 +121,11 @@ class Store:
         databases are migrated conservatively: ambiguous active owners go to
         NEEDS_HUMAN instead of being requeued or implicitly authorized.
         """
-        with self._connect() as db:
+        with self._connect(set_wal=False) as db:
+            # Hold a writer reservation across integrity/version checks and
+            # migration so another process cannot change the inspected state
+            # between preflight and schema writes.
+            db.execute("BEGIN IMMEDIATE")
             # Reject corruption and pre-existing orphan records *before* any
             # migration DDL. Foreign keys alone do not validate older rows.
             check = db.execute("PRAGMA quick_check").fetchone()
@@ -117,7 +134,39 @@ class Store:
             if db.execute("PRAGMA foreign_key_check").fetchone() is not None:
                 raise ValueError("SQLite foreign-key violations; no migration performed")
 
-            db.execute("BEGIN IMMEDIATE")
+            has_versions = db.execute("""SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='orchestrator_schema_versions'""").fetchone()
+            row = None
+            if has_versions:
+                row = db.execute("""SELECT version FROM orchestrator_schema_versions
+                                    WHERE component='task-store'""").fetchone()
+            if row is not None and row["version"] not in (1, 2):
+                raise ValueError("unsupported task-store schema version")
+
+            has_tasks = db.execute("""SELECT 1 FROM sqlite_master
+                WHERE type='table' AND name='tasks'""").fetchone()
+            before_columns = ({r[1] for r in db.execute("PRAGMA table_info(tasks)")}
+                              if has_tasks else set())
+            if row is not None and row["version"] == 2:
+                missing = _V2_REQUIRED_TASK_COLUMNS - before_columns
+                if missing:
+                    names = ", ".join(sorted(missing))
+                    raise ValueError(f"versioned task-store missing mandatory columns: {names}")
+                claimed = ",".join("?" for _ in _CLAIMED_STATES)
+                invalid_owner = db.execute(
+                    f"""SELECT task_id FROM tasks WHERE state IN ({claimed}) AND (
+                           claim_token IS NULL OR trim(claim_token)='' OR
+                           claim_version IS NULL OR claim_version<1 OR
+                           (state IN (?,?,?) AND lease_until IS NULL)) LIMIT 1""",
+                    (*_CLAIMED_STATES,
+                     TaskState.RESERVED.value, TaskState.DISPATCHING.value,
+                     TaskState.IN_PROGRESS.value),
+                ).fetchone()
+                if invalid_owner is not None:
+                    raise ValueError(
+                        "versioned task-store contains active tasks without valid claim ownership"
+                    )
+
             db.execute("""CREATE TABLE IF NOT EXISTS tasks (
                 task_id TEXT PRIMARY KEY,
                 project_id TEXT NOT NULL, role TEXT NOT NULL,
@@ -142,15 +191,8 @@ class Store:
                 component TEXT PRIMARY KEY, version INTEGER NOT NULL
                     CHECK(version >= 1), updated_at REAL NOT NULL
             )""")
-            row = db.execute("""SELECT version FROM orchestrator_schema_versions
-                                WHERE component='task-store'""").fetchone()
-            if row is not None and row["version"] not in (1, 2):
-                raise ValueError("unsupported task-store schema version")
-
             existing = {r[1] for r in db.execute("PRAGMA table_info(tasks)")}
-            legacy_ownership = "claim_token" not in existing
-            if row is not None and row["version"] == 2 and legacy_ownership:
-                raise ValueError("versioned task-store missing mandatory claim ownership")
+            legacy_ownership = not _TASK_OWNERSHIP_COLUMNS.issubset(existing)
 
             for name, declaration in (
                 ("claim_token", "TEXT"),
@@ -161,18 +203,27 @@ class Store:
             ):
                 if name not in existing:
                     db.execute(f"ALTER TABLE tasks ADD COLUMN {name} {declaration}")
+            claimed = ",".join("?" for _ in _CLAIMED_STATES)
             if legacy_ownership:
-                legacy_states = (
-                    TaskState.RESERVED.value, TaskState.DISPATCHING.value,
-                    TaskState.IN_PROGRESS.value, TaskState.UNKNOWN_DELIVERY.value,
-                    TaskState.RESULT_RECEIVED.value, TaskState.VERIFIED.value,
-                )
                 db.execute(
                     "UPDATE tasks SET state=?,error=?,lease_until=NULL WHERE state IN (" +
-                    ",".join("?" for _ in legacy_states) + ")",
+                    claimed + ")",
                     (TaskState.NEEDS_HUMAN.value,
                      "legacy V3 owner cannot be verified; reconcile manually",
-                     *legacy_states),
+                     *_CLAIMED_STATES),
+                )
+            else:
+                db.execute(
+                    f"""UPDATE tasks SET state=?,error=?,lease_until=NULL
+                        WHERE state IN ({claimed}) AND (
+                            claim_token IS NULL OR trim(claim_token)='' OR
+                            claim_version IS NULL OR claim_version<1 OR
+                            (state IN (?,?,?) AND lease_until IS NULL))""",
+                    (TaskState.NEEDS_HUMAN.value,
+                     "legacy task owner cannot be verified; reconcile manually",
+                     *_CLAIMED_STATES,
+                     TaskState.RESERVED.value, TaskState.DISPATCHING.value,
+                     TaskState.IN_PROGRESS.value),
                 )
 
             if db.execute("PRAGMA foreign_key_check").fetchone() is not None:
@@ -183,6 +234,11 @@ class Store:
                 version=excluded.version,updated_at=excluded.updated_at""", (time.time(),))
             # Context-managed connection commits all DDL and state changes
             # together. Crash/exception before this point rolls back both.
+
+        # Do not change journal mode until the existing schema has passed
+        # integrity/version checks and the migration has committed.
+        with self._connect() as db:
+            pass
 
     def _event(self, db, task_id: str, kind: str, detail: str = ""):
         db.execute("INSERT INTO events(task_id,kind,detail,at) VALUES (?,?,?,?)",
