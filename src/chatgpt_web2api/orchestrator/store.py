@@ -102,44 +102,56 @@ class Store:
             db.close()
 
     def _initialize(self):
+        """Upgrade the task-store schema in one rollback-safe SQLite transaction.
+
+        Schema v2 is the first explicitly recorded version. Pre-versioned V3
+        databases are migrated conservatively: ambiguous active owners go to
+        NEEDS_HUMAN instead of being requeued or implicitly authorized.
+        """
         with self._connect() as db:
-            db.executescript("""
-                CREATE TABLE IF NOT EXISTS tasks (
-                    task_id TEXT PRIMARY KEY,
-                    project_id TEXT NOT NULL,
-                    role TEXT NOT NULL,
-                    prompt_sha TEXT NOT NULL,
-                    dependencies TEXT NOT NULL,
-                    write_scopes TEXT NOT NULL,
-                    baseline_sha TEXT NOT NULL,
-                    review_of TEXT,
-                    state TEXT NOT NULL,
-                    slot INTEGER,
-                    conversation_id TEXT,
-                    delivery_id TEXT,
-                    evidence_ref TEXT,
-                    error TEXT,
-                    updated_at REAL NOT NULL,
-                    claim_token TEXT,
-                    claim_version INTEGER NOT NULL DEFAULT 0,
-                    lease_until REAL,
-                    reviewer_ref TEXT,
-                    approved_by TEXT
-                );
-                CREATE INDEX IF NOT EXISTS ix_tasks_project_state ON tasks(project_id, state);
-                CREATE UNIQUE INDEX IF NOT EXISTS ux_active_slot
-                ON tasks(project_id, slot) WHERE slot IS NOT NULL;
-                CREATE TABLE IF NOT EXISTS events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    task_id TEXT NOT NULL,
-                    kind TEXT NOT NULL,
-                    detail TEXT,
-                    at REAL NOT NULL
-                );
-            """)
-            # Non-destructive migration for databases created by Orchestrator V3.
+            # Reject corruption and pre-existing orphan records *before* any
+            # migration DDL. Foreign keys alone do not validate older rows.
+            check = db.execute("PRAGMA quick_check").fetchone()
+            if check is None or check[0] != "ok":
+                raise ValueError("SQLite integrity check failed; no migration performed")
+            if db.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                raise ValueError("SQLite foreign-key violations; no migration performed")
+
+            db.execute("BEGIN IMMEDIATE")
+            db.execute("""CREATE TABLE IF NOT EXISTS tasks (
+                task_id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL, role TEXT NOT NULL,
+                prompt_sha TEXT NOT NULL, dependencies TEXT NOT NULL,
+                write_scopes TEXT NOT NULL, baseline_sha TEXT NOT NULL,
+                review_of TEXT, state TEXT NOT NULL, slot INTEGER,
+                conversation_id TEXT, delivery_id TEXT, evidence_ref TEXT,
+                error TEXT, updated_at REAL NOT NULL, claim_token TEXT,
+                claim_version INTEGER NOT NULL DEFAULT 0, lease_until REAL,
+                reviewer_ref TEXT, approved_by TEXT
+            )""")
+            db.execute("""CREATE INDEX IF NOT EXISTS ix_tasks_project_state
+                          ON tasks(project_id, state)""")
+            db.execute("""CREATE UNIQUE INDEX IF NOT EXISTS ux_active_slot
+                          ON tasks(project_id, slot) WHERE slot IS NOT NULL""")
+            db.execute("""CREATE TABLE IF NOT EXISTS events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL, kind TEXT NOT NULL,
+                detail TEXT, at REAL NOT NULL
+            )""")
+            db.execute("""CREATE TABLE IF NOT EXISTS orchestrator_schema_versions (
+                component TEXT PRIMARY KEY, version INTEGER NOT NULL
+                    CHECK(version >= 1), updated_at REAL NOT NULL
+            )""")
+            row = db.execute("""SELECT version FROM orchestrator_schema_versions
+                                WHERE component='task-store'""").fetchone()
+            if row is not None and row["version"] not in (1, 2):
+                raise ValueError("unsupported task-store schema version")
+
             existing = {r[1] for r in db.execute("PRAGMA table_info(tasks)")}
             legacy_ownership = "claim_token" not in existing
+            if row is not None and row["version"] == 2 and legacy_ownership:
+                raise ValueError("versioned task-store missing mandatory claim ownership")
+
             for name, declaration in (
                 ("claim_token", "TEXT"),
                 ("claim_version", "INTEGER NOT NULL DEFAULT 0"),
@@ -150,17 +162,27 @@ class Store:
                 if name not in existing:
                     db.execute(f"ALTER TABLE tasks ADD COLUMN {name} {declaration}")
             if legacy_ownership:
-                # Active V3 leases had no durable owner/fencing identity.  We
-                # cannot infer they are safe to resume or requeue after an
-                # upgrade; require explicit operator reconciliation.
-                legacy_states = (TaskState.RESERVED.value, TaskState.DISPATCHING.value,
-                                 TaskState.IN_PROGRESS.value, TaskState.UNKNOWN_DELIVERY.value,
-                                 TaskState.RESULT_RECEIVED.value, TaskState.VERIFIED.value)
-                db.execute("UPDATE tasks SET state=?,error=?,lease_until=NULL "
-                           "WHERE state IN (" + ",".join("?" for _ in legacy_states) + ")",
-                           (TaskState.NEEDS_HUMAN.value,
-                            "legacy V3 owner cannot be verified; reconcile manually",
-                            *legacy_states))
+                legacy_states = (
+                    TaskState.RESERVED.value, TaskState.DISPATCHING.value,
+                    TaskState.IN_PROGRESS.value, TaskState.UNKNOWN_DELIVERY.value,
+                    TaskState.RESULT_RECEIVED.value, TaskState.VERIFIED.value,
+                )
+                db.execute(
+                    "UPDATE tasks SET state=?,error=?,lease_until=NULL WHERE state IN (" +
+                    ",".join("?" for _ in legacy_states) + ")",
+                    (TaskState.NEEDS_HUMAN.value,
+                     "legacy V3 owner cannot be verified; reconcile manually",
+                     *legacy_states),
+                )
+
+            if db.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                raise ValueError("post-migration foreign-key violation")
+            db.execute("""INSERT INTO orchestrator_schema_versions
+                (component,version,updated_at) VALUES ('task-store',2,?)
+                ON CONFLICT(component) DO UPDATE SET
+                version=excluded.version,updated_at=excluded.updated_at""", (time.time(),))
+            # Context-managed connection commits all DDL and state changes
+            # together. Crash/exception before this point rolls back both.
 
     def _event(self, db, task_id: str, kind: str, detail: str = ""):
         db.execute("INSERT INTO events(task_id,kind,detail,at) VALUES (?,?,?,?)",

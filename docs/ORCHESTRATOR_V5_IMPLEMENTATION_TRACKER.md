@@ -384,6 +384,19 @@ See [PR-30 fixture and lint recovery](ORCHESTRATOR_PR30_FIXTURE_LINT_RECOVERY.md
 
 See [PR-32 assignment-bound mock outbox design](ORCHESTRATOR_PR32_ASSIGNMENT_BOUND_MOCK_OUTBOX.md).
 
+## PR-33 (P0) — Local storage integrity and opt-in Windows ACL setup (Draft PR #35)
+
+- [x] Create a new stacked development branch `codex/local-v33-storage-hardening-no-ci` on PR #34's exact HEAD. The branch is intentionally **outside** the `codex/orchestrator-*` push trigger; no GitHub CI is to be requested or executed for this task.
+- [x] Make Store V3→v2 schema upgrades one SQLite `BEGIN IMMEDIATE` transaction; record `orchestrator_schema_versions(task-store=2)`, quarantine ambiguous V3 active reservations and reject unknown future versions.
+- [x] Check `PRAGMA quick_check` and `PRAGMA foreign_key_check` before schema writes; recheck FK after migration; rollback the metadata/DDL/quarantine together on error.
+- [x] Add explicit `init-private-workspace --label ...` on Windows for **new** empty workspaces only, using current account SID, shell-free `icacls` inheritance removal, private SID + SYSTEM grants and canonical ACL verification. Existing directories are never rewritten.
+- [x] Add local no-clobber same-directory SQLite online snapshot/backup CLI and regression tests for interrupted migrations, uncommitted transaction process exit, broken foreign keys, staging file cleanup, backup collisions and ACL command safety.
+- [ ] P0: Execute new focused and full offline tests **locally on a trusted Windows host** with Python 3.11/3.12; inspect Ruff and verify actual ACL entries/effective access on Windows. No CI was run by request.
+- [ ] P0: An explicit protected-workspace provisioning path is not a blanket guarantee over legacy SQLite/attachment paths; validate permission inheritance, reparse guards, same-volume link capability and backup/restore drill.
+- [ ] P0: Future provider transport and finalizer remain disabled; branch-controlled test output cannot authorize remote sends.
+
+See [PR-33 storage hardening design](ORCHESTRATOR_PR33_STORAGE_HARDENING.md).
+
 ## PR-08 (P2) — Windows lifecycle and release
 
 - [ ] Per-user Windows install/daemon, protected credential storage, no shared Chrome profile collision.
