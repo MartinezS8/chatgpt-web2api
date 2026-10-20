@@ -19,6 +19,7 @@ def private(tmp_path, monkeypatch):
     monkeypatch.delenv("CHATGPT_ORCHESTRATOR_DB", raising=False)
     root = tmp_path / "private"
     root.mkdir()
+    root = root.resolve(strict=True)  # macOS may expose /var via /private/var
     blobs = root / "blobs"
     blobs.mkdir()
     ctx = PrivateStorageContext(root, root / "controller.sqlite3", blobs)
