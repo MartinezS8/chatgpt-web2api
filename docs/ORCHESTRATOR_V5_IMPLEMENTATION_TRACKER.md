@@ -366,6 +366,24 @@ See [PR-29 Ruff debt audit](ORCHESTRATOR_PR29_RUFF_SAFE_FIX_AUDIT.md).
 
 See [PR-30 fixture and lint recovery](ORCHESTRATOR_PR30_FIXTURE_LINT_RECOVERY.md).
 
+## PR-31 (P0) — Windows readiness integration (Draft PR #33)
+
+- [x] Take the **two original Windows commits unchanged** from `codex/local-windows-readiness-2026-10-20`, exact HEAD `c7e9932caeaac383d013f8f821df567d2218d23c`, into a new `codex/orchestrator-v31-windows-readiness` branch stacked on PR #32.
+- [x] Local Codex report (not GitHub-attested) states Python 3.11/3.12 **1058 tests and 20 subtests** each, clean Ruff and build, MCP handshake, 14/14 mock scenarios. 31 live account E2E tests intentionally excluded.
+- [x] Creating the matching branch triggered developer diagnostics GitHub Actions run [39415583339](https://github.com/MartinezS8/chatgpt-web2api/actions/runs/39415583339).
+- [ ] P0: Check **six** OS/Python results, exact commit, strict postflight and dependent wheel build. Workflow is editable and **untrusted**, never an owner-approved CI gate.
+- [ ] P0: Independent Windows ACL enforcement, fail-safe SQLite migration/integrity check and crash/partial-write recovery remain unverified; real workers prohibited.
+
+## PR-32 (P0) — Assignment-bound offline mock dispatch (Draft PR #34)
+
+- [x] Add `DispatchOutbox.begin_mock_for_assignment(task_id,worker_id,claim_token)` without changing existing mock-only legacy behavior. A single immediate SQLite transaction checks *active* assignment, matching enabled mock worker, project/role, claim version, sealed package, token and unexpired lease before **one** dispatch intent.
+- [x] Refuse wrong/missing, disabled, released, wrong-role, stale-version or expired worker bindings without creating an intent; repeated same-claim invocation never generates a second permit. All receipts explicitly say `remote_send_permitted=False`.
+- [ ] P0: Verify full strict matrix and package build on the **new exact SHA**, including the focused negative/race tests.
+- [ ] P0: This is strictly mock-only. Any future live dispatcher MUST recheck the worker assignment at the actual provider-send boundary, protect authorization with a trusted transport, and quarantine unknown sends; this method does not make that possible by itself.
+- [ ] P0: Versioned SQLite migrations, OS ACLs, after-crash recovery tests, and trusted CI are separate follow-ups.
+
+See [PR-32 assignment-bound mock outbox design](ORCHESTRATOR_PR32_ASSIGNMENT_BOUND_MOCK_OUTBOX.md).
+
 ## PR-08 (P2) — Windows lifecycle and release
 
 - [ ] Per-user Windows install/daemon, protected credential storage, no shared Chrome profile collision.
