@@ -136,7 +136,7 @@ def inspect_stages(directory: str | Path, *, min_age_seconds: float = 3600,
                        else "manual_review_only",
                        "age_seconds": max(0.0, now - info.st_mtime),
                        "eligible_for_locked_review": bool(
-                           eligible and now - info.st_mtime >= min_age_seconds
+                           eligible and max(0.0, now - info.st_mtime) >= min_age_seconds
                        ), "deleted": False})
     return result
 
@@ -173,7 +173,7 @@ def cleanup_managed_stages(directory: str | Path, *, min_age_seconds: float = 36
                 continue
             if not _regular(before) or not _regular(after):
                 continue
-            if now - after.st_mtime < min_age_seconds:
+            if max(0.0, now - after.st_mtime) < min_age_seconds:
                 continue
             if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
                 after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns

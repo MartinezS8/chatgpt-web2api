@@ -92,6 +92,20 @@ def test_nonregular_managed_name_cannot_be_cleaned(tmp_path):
     assert directory.is_dir()
 
 
+def test_future_timestamp_has_zero_age_and_retains_positive_age_safety(tmp_path):
+    stage = tmp_path / (".staged-v2-" + "c" * 32)
+    stage.write_bytes(b"synthetic")
+    os.utime(stage, (2000, 2000))
+    item = inspect_stages(tmp_path, min_age_seconds=0, now=1000)[0]
+    assert item["age_seconds"] == 0
+    assert item["eligible_for_locked_review"] is True
+    assert cleanup_managed_stages(tmp_path, min_age_seconds=1, now=1000,
+                                 dry_run=False)["removed"] == []
+    assert stage.exists()
+    assert cleanup_managed_stages(tmp_path, min_age_seconds=0, now=1000,
+                                 dry_run=False)["removed"] == [stage.name]
+
+
 def test_symlink_is_manual_review_only(tmp_path):
     target = tmp_path / "target"
     target.write_bytes(b"untouched")
