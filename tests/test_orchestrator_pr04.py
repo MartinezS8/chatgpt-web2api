@@ -55,7 +55,9 @@ def db(tmp_path):
         d.execute("INSERT INTO orchestrator_workers VALUES ('qa','personal','p','fake:qa','review','mock',1)")
         d.execute("INSERT INTO orchestrator_worker_assignments VALUES ('build','dev','active')")
         d.execute("INSERT INTO orchestrator_worker_assignments VALUES ('review-1','qa','active')")
-        d.execute("UPDATE tasks SET state='verified',evidence_ref='mock-ref' WHERE task_id IN ('build','review-1')")
+        d.execute("""UPDATE tasks SET state='verified',evidence_ref='mock-ref',
+                   claim_token='test-verified-claim-' || task_id,claim_version=1,
+                   lease_until=NULL WHERE task_id IN ('build','review-1')""")
     return store
 
 @pytest.fixture
