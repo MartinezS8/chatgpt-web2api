@@ -397,6 +397,19 @@ See [PR-32 assignment-bound mock outbox design](ORCHESTRATOR_PR32_ASSIGNMENT_BOU
 
 See [PR-33 storage hardening design](ORCHESTRATOR_PR33_STORAGE_HARDENING.md).
 
+## PR-34 (P0/P1) — Cooperative crash staging & source identity (Draft PR #36)
+
+- [x] Read PR #35 exact source SHA `757df4a48d148d85bb280013e020c59672127766`; do not treat 1099 local Windows tests as hosted evidence until independently confirmed.
+- [x] Add `stage_maintenance` with permanent per-directory cross-process OS lock, V2-only named staging files and default read-only inspection. Cleanup only on explicit request after the exclusive lock; old unknown `.staged-*` / `.sqlite-snapshot-*` files are **never** deleted automatically.
+- [x] Update TaskPackages and SQLite online-backup staged writes to hold the cooperative lock for their *entire* staging/publication lifetime and leave no repeated remote operation.
+- [x] Reject attachment source replacement after preflight by comparing `fstat` file identity/size/mtime with the initial file stat; retain allow-root/junction checks. This detects common substitutions but **does not claim full Win32 handle-based TOCTOU protection** against a malicious process that can rename trusted directories.
+- [x] Add hard-process-exit, active writer, legacy-preservation, concurrency, source swap and local CLI opt-in regression tests. Windows >260-char path diagnostic is a separately reported runner capability; not an unconditional product guarantee.
+- [ ] P0: Verify exact HEAD with all six Python/OS strict, non-E2E workflow checks and dependent package build on current feature branch; actual counts and failures must come from CI receipts.
+- [ ] P0: A second-account effective Windows ACL read/write/dir-list denial requires a separate native throwaway test user; **NOT TESTED** in this implementation. Win32-native handle-relative open and path invariance also remain separate before any untrusted shared-root use.
+- [ ] P0: No live remote transports, app/plugin selection, callback authentication or production finalizer.
+
+See [PR-34 staging recovery and path-race limitations](ORCHESTRATOR_PR34_STAGE_RECOVERY_SECURITY.md).
+
 ## PR-08 (P2) — Windows lifecycle and release
 
 - [ ] Per-user Windows install/daemon, protected credential storage, no shared Chrome profile collision.

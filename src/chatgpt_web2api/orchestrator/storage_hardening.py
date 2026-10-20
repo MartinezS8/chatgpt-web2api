@@ -13,10 +13,11 @@ import re
 import sqlite3
 import stat
 import subprocess
-import tempfile
 from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
+
+from .stage_maintenance import create_managed_stage, stage_guard
 
 _SID = re.compile(r"S-1-\d+(?:-\d+)+\Z")
 _LABEL = re.compile(r"[a-zA-Z0-9][a-zA-Z0-9_-]{0,39}\Z")
@@ -61,6 +62,12 @@ def reject_reparse_path(path: str | Path, *, error_message: str) -> None:
     FILE_ATTRIBUTE_REPARSE_POINT bit is 0x0400.
     """
     absolute = Path(os.path.abspath(Path(path).expanduser()))
+    if os.name != "nt":
+        # macOS exposes many trusted temporary paths via /var -> /private/var.
+        # Canonicalize these POSIX aliases before checking components. The
+        # caller still verifies allowed_root containment on resolved paths,
+        # and direct attachment symlinks are refused.
+        absolute = absolute.resolve(strict=False)
     current = Path(absolute.anchor)
     for part in absolute.parts[1:]:
         current = current / part
@@ -177,24 +184,27 @@ def snapshot_sqlite_same_directory(database: str | Path, filename: str) -> Path:
     if dest.exists() or dest.is_symlink():
         raise FileExistsError("backup filename already exists")
 
-    fd, name = tempfile.mkstemp(prefix=".sqlite-snapshot-", dir=parent)
-    os.close(fd)
-    stage = Path(name)
-    try:
-        with closing(sqlite3.connect(src)) as source:
-            with closing(sqlite3.connect(stage)) as target:
-                source.backup(target)  # includes committed WAL transactions
-                check = target.execute("PRAGMA integrity_check").fetchone()
-                if check is None or check[0] != "ok":
-                    raise ValueError("snapshot SQLite integrity check failed")
-                if target.execute("PRAGMA foreign_key_check").fetchone() is not None:
-                    raise ValueError("snapshot foreign key check failed")
-        if os.name != "nt":
-            os.chmod(stage, 0o600)
-        with stage.open("r+b") as handle:
-            os.fsync(handle.fileno())
-        # Same-volume, no-clobber publish; never os.replace an older backup.
-        os.link(stage, dest)
-        return dest
-    finally:
-        stage.unlink(missing_ok=True)
+    # The writer holds the cooperative directory lock until successful
+    # publication or deletion. Recovery can only remove V2 stages after this
+    # process has exited and the OS has released its lock.
+    with stage_guard(parent):
+        fd, stage = create_managed_stage(parent, "sqlite-snapshot")
+        os.close(fd)
+        try:
+            with closing(sqlite3.connect(src)) as source:
+                with closing(sqlite3.connect(stage)) as target:
+                    source.backup(target)  # includes committed WAL transactions
+                    check = target.execute("PRAGMA integrity_check").fetchone()
+                    if check is None or check[0] != "ok":
+                        raise ValueError("snapshot SQLite integrity check failed")
+                    if target.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                        raise ValueError("snapshot foreign key check failed")
+            if os.name != "nt":
+                os.chmod(stage, 0o600)
+            with stage.open("r+b") as handle:
+                os.fsync(handle.fileno())
+            # Same-volume, no-clobber publish; no external provider actions.
+            os.link(stage, dest)
+            return dest
+        finally:
+            stage.unlink(missing_ok=True)

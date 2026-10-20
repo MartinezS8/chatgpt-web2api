@@ -16,6 +16,7 @@ from pathlib import Path
 from .observer_commands import OBS_COMMANDS, configure_observer_commands, execute_observer_command
 from .outbox import DispatchOutbox
 from .resource_registry import ResourceIdentity, ResourceRegistry
+from .stage_maintenance import cleanup_managed_stages
 from .storage_hardening import create_private_windows_workspace, snapshot_sqlite_same_directory
 from .store import Store, TaskSpec
 from .task_packages import TaskPackages
@@ -43,6 +44,12 @@ def build_parser() -> argparse.ArgumentParser:
     s = commands.add_parser("backup-local-db",
                             help="Create a no-clobber SQLite backup beside an existing --db")
     s.add_argument("--filename", required=True, help="Simple backup filename ending .sqlite3")
+    s = commands.add_parser("staging-audit",
+                            help="Inspect staging; optionally clean ONLY locked managed-v2 leftovers")
+    s.add_argument("--root", required=True, help="Explicit local staging directory")
+    s.add_argument("--older-than-hours", type=float, default=24.0)
+    s.add_argument("--delete-managed-v2", action="store_true",
+                   help="Explicitly delete only safe managed-v2 leftovers (never legacy)")
     s = commands.add_parser("status", help="Show project task counts and occupied slots")
     s.add_argument("--project", required=True)
     s = commands.add_parser("list-tasks", help="List existing tasks in a project")
@@ -101,6 +108,7 @@ def _capabilities() -> dict:
     return {
         "task_store": "sqlite-wal", "max_worker_slots": 5,
         "commands": ["capabilities", "init-private-workspace", "backup-local-db",
+                     "staging-audit",
                      "status", "list-tasks", "task", "events",
                      "create-task", "register-resource", "resolve-resource", "list-resources",
                      "seal-task", "task-package", "delivery-events", "ack-delivery-event",
@@ -147,6 +155,16 @@ def execute(args: argparse.Namespace) -> dict:
                 "blobs": str(workspace.blobs),
                 "windows_private_acl_provisioned": True,
                 "remote_actions_permitted": False}
+    if args.command == "staging-audit":
+        if not 0 <= args.older_than_hours <= 8760:
+            raise ValueError("invalid staging audit age in hours")
+        if args.delete_managed_v2 and args.older_than_hours < 1:
+            raise ValueError("managed V2 deletion requires minimum age of one hour")
+        result = cleanup_managed_stages(
+            args.root, min_age_seconds=args.older_than_hours * 3600,
+            dry_run=not args.delete_managed_v2
+        )
+        return {**result, "remote_actions_permitted": False}
     if not args.db:
         raise ValueError("--db or CHATGPT_ORCHESTRATOR_DB must be set")
     if args.command == "backup-local-db":
