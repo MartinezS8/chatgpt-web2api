@@ -106,6 +106,9 @@ class DispatchOutbox:
         On a repeat call, the original attempt can only be observed by its
         still-enabled bound worker; no second send permit is issued.
         """
+        # None must not fall through to the legacy unbound offline API.
+        if not isinstance(worker_id, str) or not worker_id:
+            raise ValueError("nonempty worker_id required")
         receipt = self.begin(task_id, claim_token, worker_id=worker_id)
         return {**receipt, "assurance": "offline_mock_only",
                 "remote_send_permitted": False}

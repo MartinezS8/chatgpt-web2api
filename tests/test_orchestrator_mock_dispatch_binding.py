@@ -51,7 +51,7 @@ def test_valid_assignment_creates_exactly_one_offline_intent(assigned):
     assert len(outbox.events()) == 1
 
 
-@pytest.mark.parametrize("worker_id", ["other-worker", "", "worker-2"])
+@pytest.mark.parametrize("worker_id", ["other-worker", "", None, "worker-2"])
 def test_wrong_or_missing_worker_never_starts_dispatch(assigned, worker_id):
     store, _, outbox, _ = assigned
     with pytest.raises(ValueError):
