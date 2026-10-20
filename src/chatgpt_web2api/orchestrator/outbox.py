@@ -43,7 +43,14 @@ class DispatchOutbox:
         db.execute("INSERT OR IGNORE INTO orchestrator_delivery_events(event_key,task_id,attempt_id,kind,payload,at) VALUES (?,?,?,?,?,?)",
                    (key,task,attempt,kind,_stable_json(body or {}),time.time()))
 
-    def begin(self, task_id: str, claim_token: str) -> dict:
+    def begin(self, task_id: str, claim_token: str, *, worker_id: str | None = None) -> dict:
+        """Record an offline dispatch intent; never an external send authorization.
+
+        Existing local callers without worker_id remain mock-only. A new
+        controller path should use begin_mock_for_assignment(), which binds the
+        current worker, assignment, task and claim in one SQLite transaction.
+        A future real adapter MUST independently fence the send at send time.
+        """
         if not claim_token:
             raise ValueError("claim token required")
         package = self.packages.read(task_id, verify_blobs=True)  # fail BEFORE write intent
@@ -53,6 +60,21 @@ class DispatchOutbox:
             task=db.execute("SELECT * FROM tasks WHERE task_id=?",(task_id,)).fetchone()
             if task is None:
                 raise ValueError("unknown task")
+            if worker_id is not None:
+                if not isinstance(worker_id, str) or not worker_id:
+                    raise ValueError("nonempty worker_id required")
+                assignment = db.execute("""SELECT a.worker_id,a.claim_version,
+                       w.enabled,w.transport,w.role AS worker_role,
+                       w.project_id AS worker_project
+                    FROM orchestrator_worker_assignments a
+                    JOIN orchestrator_workers w ON w.worker_id=a.worker_id
+                    WHERE a.task_id=? AND a.state='active'""", (task_id,)).fetchone()
+                if (assignment is None or assignment["worker_id"] != worker_id or
+                        assignment["enabled"] != 1 or
+                        assignment["transport"] != "mock" or
+                        assignment["worker_role"] != task["role"] or
+                        assignment["worker_project"] != task["project_id"]):
+                    raise ValueError("no enabled matching mock worker assignment")
             existing=db.execute("SELECT * FROM orchestrator_dispatch_attempts WHERE task_id=?",(task_id,)).fetchone()
             if existing:
                 # Introspection is fenced too; an incorrect token must never
@@ -64,6 +86,8 @@ class DispatchOutbox:
                 return {"attempt_id":existing["attempt_id"],"status":existing["status"],"new_send_permit":False}
             if task["state"]!=TaskState.RESERVED.value or task["claim_token"]!=claim_token or not task["lease_until"] or task["lease_until"]<=now:
                 raise ValueError("no current fenced and unexpired claim")
+            if worker_id is not None and assignment["claim_version"] != task["claim_version"]:
+                raise ValueError("mock worker assignment claim version mismatch")
             attempt=secrets.token_hex(20)
             token_hash=hashlib.sha256(claim_token.encode()).hexdigest()
             db.execute("INSERT INTO orchestrator_dispatch_attempts VALUES(?,?,?,?,?,?,?,?,?,?,?)",
@@ -74,6 +98,17 @@ class DispatchOutbox:
         # This flag is valid only for this *in-process* return. Never persist
         # or reconstruct a new send permit after a crash or lost response.
         return {"attempt_id":attempt,"status":"intent","new_send_permit":True}
+
+    def begin_mock_for_assignment(self, *, task_id: str, worker_id: str,
+                                  claim_token: str) -> dict:
+        """Create one assignment-bound *mock* intent, with no remote permission.
+
+        On a repeat call, the original attempt can only be observed by its
+        still-enabled bound worker; no second send permit is issued.
+        """
+        receipt = self.begin(task_id, claim_token, worker_id=worker_id)
+        return {**receipt, "assurance": "offline_mock_only",
+                "remote_send_permitted": False}
 
     def get(self, attempt_id: str) -> dict | None:
         with self.store._connect() as db:
