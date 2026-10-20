@@ -16,6 +16,7 @@ from pathlib import Path
 from .observer_commands import OBS_COMMANDS, configure_observer_commands, execute_observer_command
 from .outbox import DispatchOutbox
 from .resource_registry import ResourceIdentity, ResourceRegistry
+from .staging_audit import inspect_staging_directory
 from .storage_hardening import create_private_windows_workspace, snapshot_sqlite_same_directory
 from .store import Store, TaskSpec
 from .task_packages import TaskPackages
@@ -40,6 +41,8 @@ def build_parser() -> argparse.ArgumentParser:
     s = commands.add_parser("init-private-workspace",
                             help="Opt-in NEW Windows ACL-protected local SQLite/blob directory")
     s.add_argument("--label", required=True, help="New workspace name; existing paths are refused")
+    s = commands.add_parser("audit-staging", help="Read-only scan of staged temporary files")
+    s.add_argument("--directory", required=True, help="Existing staging folder; no cleanup")
     s = commands.add_parser("backup-local-db",
                             help="Create a no-clobber SQLite backup beside an existing --db")
     s.add_argument("--filename", required=True, help="Simple backup filename ending .sqlite3")
@@ -147,6 +150,10 @@ def execute(args: argparse.Namespace) -> dict:
                 "blobs": str(workspace.blobs),
                 "windows_private_acl_provisioned": True,
                 "remote_actions_permitted": False}
+    if args.command == "audit-staging":
+        candidates = inspect_staging_directory(args.directory)
+        return {"candidates": [vars(item) for item in candidates],
+                "automatic_cleanup_permitted": False, "remote_actions_permitted": False}
     if not args.db:
         raise ValueError("--db or CHATGPT_ORCHESTRATOR_DB must be set")
     if args.command == "backup-local-db":

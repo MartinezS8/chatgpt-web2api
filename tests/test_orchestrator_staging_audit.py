@@ -56,3 +56,35 @@ def test_active_writer_candidate_not_removed(tmp_path):
         assert seen[0].disposition == "manual_review_only"
         assert candidate.exists()
     assert candidate.read_bytes() == b"live"
+
+def test_hard_process_exit_leaves_candidate_for_manual_review(tmp_path):
+    import subprocess
+    import sys
+
+    root = str(tmp_path)
+    script = (
+        "import os,sys\n"
+        "p=os.path.join(sys.argv[1],'.staged-crashed')\n"
+        "f=open(p,'wb')\n"
+        "f.write(b'partial')\n"
+        "f.flush()\n"
+        "os._exit(0)\n"
+    )
+    subprocess.run([sys.executable, "-c", script, root], check=True, timeout=15)
+    item = tmp_path / ".staged-crashed"
+    assert item.read_bytes() == b"partial"
+    assert inspect_staging_directory(tmp_path)[0].disposition == "manual_review_only"
+
+
+def test_cli_staging_scan_does_not_need_database(tmp_path):
+    from chatgpt_web2api.orchestrator.cli import build_parser, execute
+
+    candidate = tmp_path / ".sqlite-snapshot-active"
+    candidate.write_bytes(b"live")
+    result = execute(build_parser().parse_args([
+        "audit-staging", "--directory", str(tmp_path),
+    ]))
+    assert result["automatic_cleanup_permitted"] is False
+    assert result["remote_actions_permitted"] is False
+    assert len(result["candidates"]) == 1
+    assert candidate.read_bytes() == b"live"
