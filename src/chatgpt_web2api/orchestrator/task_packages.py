@@ -15,6 +15,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from .storage_hardening import reject_reparse_path
 from .store import Store
 
 _MAX_PROMPT = 1024 * 1024
@@ -38,7 +39,13 @@ class TaskPackages:
         root = Path(blob_root).expanduser()
         if root.is_symlink():
             raise ValueError("artifact root cannot be a symbolic link")
+        reject_reparse_path(
+            root, error_message="artifact root cannot traverse a reparse point"
+        )
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        reject_reparse_path(
+            root, error_message="artifact root cannot traverse a reparse point"
+        )
         self.blob_root = root.resolve(strict=True)
         with store._connect() as db:
             db.execute("""CREATE TABLE IF NOT EXISTS orchestrator_task_packages (
@@ -97,7 +104,14 @@ class TaskPackages:
             raise ValueError("too many attachments")
         if attachments and allowed_root is None:
             raise ValueError("allowed_root is mandatory when sealing attachments")
-        allowed = Path(allowed_root).expanduser().resolve(strict=True) if allowed_root else None
+        if allowed_root:
+            supplied_allowed = Path(allowed_root).expanduser()
+            reject_reparse_path(
+                supplied_allowed, error_message="allowed_root cannot traverse a reparse point"
+            )
+            allowed = supplied_allowed.resolve(strict=True)
+        else:
+            allowed = None
         if allowed is not None and not allowed.is_dir():
             raise ValueError("allowed_root must be a directory")
         checked: list[tuple[Path, int]] = []
@@ -106,6 +120,9 @@ class TaskPackages:
             raw = Path(supplied).expanduser()
             if raw.is_symlink():
                 raise ValueError("symlink attachments are forbidden")
+            reject_reparse_path(
+                raw, error_message="attachment path cannot traverse a reparse point"
+            )
             try:
                 real = raw.resolve(strict=True)
             except (OSError, RuntimeError) as exc:

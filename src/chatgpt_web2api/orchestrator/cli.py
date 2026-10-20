@@ -16,6 +16,7 @@ from pathlib import Path
 from .observer_commands import OBS_COMMANDS, configure_observer_commands, execute_observer_command
 from .outbox import DispatchOutbox
 from .resource_registry import ResourceIdentity, ResourceRegistry
+from .storage_hardening import create_private_windows_workspace, snapshot_sqlite_same_directory
 from .store import Store, TaskSpec
 from .task_packages import TaskPackages
 from .worker_commands import (
@@ -36,6 +37,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="Machine-readable JSON response")
     commands = p.add_subparsers(dest="command", required=True)
     commands.add_parser("capabilities", help="Display supported operations and safety boundaries")
+    s = commands.add_parser("init-private-workspace",
+                            help="Opt-in NEW Windows ACL-protected local SQLite/blob directory")
+    s.add_argument("--label", required=True, help="New workspace name; existing paths are refused")
+    s = commands.add_parser("backup-local-db",
+                            help="Create a no-clobber SQLite backup beside an existing --db")
+    s.add_argument("--filename", required=True, help="Simple backup filename ending .sqlite3")
     s = commands.add_parser("status", help="Show project task counts and occupied slots")
     s.add_argument("--project", required=True)
     s = commands.add_parser("list-tasks", help="List existing tasks in a project")
@@ -93,7 +100,8 @@ def build_parser() -> argparse.ArgumentParser:
 def _capabilities() -> dict:
     return {
         "task_store": "sqlite-wal", "max_worker_slots": 5,
-        "commands": ["capabilities", "status", "list-tasks", "task", "events",
+        "commands": ["capabilities", "init-private-workspace", "backup-local-db",
+                     "status", "list-tasks", "task", "events",
                      "create-task", "register-resource", "resolve-resource", "list-resources",
                      "seal-task", "task-package", "delivery-events", "ack-delivery-event",
                      "reconcile-dispatch", "claim", "recover"],
@@ -130,8 +138,20 @@ def execute(args: argparse.Namespace) -> dict:
         return capabilities()
     if args.command == "capabilities":
         return _capabilities()
+    if args.command == "init-private-workspace":
+        workspace = create_private_windows_workspace(args.label)
+        store = Store(workspace.database)
+        TaskPackages(store, workspace.blobs)
+        return {"workspace": str(workspace.root),
+                "database": str(workspace.database),
+                "blobs": str(workspace.blobs),
+                "windows_private_acl_provisioned": True,
+                "remote_actions_permitted": False}
     if not args.db:
         raise ValueError("--db or CHATGPT_ORCHESTRATOR_DB must be set")
+    if args.command == "backup-local-db":
+        location = snapshot_sqlite_same_directory(args.db, args.filename)
+        return {"backup": str(location), "remote_actions_permitted": False}
     db_path = Path(args.db).expanduser().resolve()
     if args.command in OBS_COMMANDS:
         return execute_observer_command(args, db_path)
