@@ -51,6 +51,9 @@ def acl_commands(path: Path, sid: str) -> tuple[list[str], ...]:
         ["icacls.exe", root, "/inheritance:r"],
         ["icacls.exe", root, "/grant:r",
          f"*{sid}:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F"],
+        # Python 3.12.4+ mkdir(0o700) adds explicit Administrators/Owner Rights
+        # ACEs. Remove only these known creation grants on this new empty root.
+        ["icacls.exe", root, "/remove:g", "*S-1-5-32-544", "*S-1-3-4"],
         ["icacls.exe", root, "/setowner", f"*{sid}"],
         ["icacls.exe", root, "/verify"],
     )

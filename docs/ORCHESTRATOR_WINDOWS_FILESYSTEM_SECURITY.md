@@ -13,6 +13,13 @@ Null DACL, unknown ACE layouts, extra trustees, inherited ACEs, incomplete
 rights and an unexpected owner fail closed. Only a new empty workspace is
 modified. Errors still invoke the existing cleanup path; no legacy ACL repair.
 
+Python 3.12.4+ `mkdir(mode=0o700)` introduces explicit Administrators and
+Owner Rights creation ACEs on Windows. Inheritance removal alone does not
+remove those grants. Provisioning removes these two known creation grants
+only from the new empty root, then verifies the same exact user/SYSTEM policy
+on both Python versions. Unknown additional ACEs still fail closed.
+See [Python mkdir behavior](https://docs.python.org/3.12/library/os.html#os.mkdir).
+
 The staging directory check now rejects Windows ancestor reparse points,
 not merely a junction at the final root. Lockfile preflight rejects nonregular
 files. These checks are observations, not atomic bindings of later path I/O.

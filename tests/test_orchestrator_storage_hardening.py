@@ -277,11 +277,12 @@ def test_windows_sid_csv_and_shell_free_icacls_arguments(tmp_path):
     sid = parse_current_user_sid('"DESKTOP\\worker","S-1-5-21-1-2-3-1001"\r\n')
     assert sid == "S-1-5-21-1-2-3-1001"
     commands = acl_commands(tmp_path / "private folder", sid)
-    assert len(commands) == 4
+    assert len(commands) == 5
     assert all(c[0] == "icacls.exe" for c in commands)
     assert commands[0][-1] == "/inheritance:r"
     assert f"*{sid}:(OI)(CI)F" in commands[1]
-    assert commands[2][-2:] == ["/setowner", f"*{sid}"]
+    assert commands[2][-3:] == ["/remove:g", "*S-1-5-32-544", "*S-1-3-4"]
+    assert commands[3][-2:] == ["/setowner", f"*{sid}"]
     with pytest.raises(ValueError):
         parse_current_user_sid('"x","invalid"')
 
