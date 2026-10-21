@@ -361,7 +361,19 @@ def test_cli_explicit_private_workspace_uses_no_remote_transport(tmp_path, monke
         lambda label: ws if label == "test" else None,
     )
     parser = build_parser()
+    validated = []
+
+    def validate_initialized(label):
+        assert label == "test"
+        assert ws.database.is_file()
+        assert ws.blobs.is_dir()
+        validated.append(label)
+
+    monkeypatch.setattr(
+        "chatgpt_web2api.orchestrator.cli.load_private_workspace", validate_initialized
+    )
     result = execute(parser.parse_args(["init-private-workspace", "--label", "test"]))
+    assert validated == ["test"]
     assert result["remote_actions_permitted"] is False
     assert ws.database.is_file()
     assert ws.blobs.is_dir()
