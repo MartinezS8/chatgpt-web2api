@@ -42,7 +42,7 @@ def _install_loader(monkeypatch, context: PrivateStorageContext):
     monkeypatch.setattr(
         storage_policy_module,
         "_private_database_pin",
-        lambda path, *, create: nullcontext(),
+        lambda path, *, create, pin_rollback_journal=False: nullcontext(),
     )
     return calls
 
@@ -82,7 +82,7 @@ def test_policy_reloads_native_context_and_rejects_a_forged_context(
     monkeypatch.setattr(
         storage_policy_module,
         "_private_database_pin",
-        lambda path, *, create: nullcontext(),
+        lambda path, *, create, pin_rollback_journal=False: nullcontext(),
     )
     policy = storage_policy_module.PrivateStoragePolicy.open("test-workspace")
     assert calls == ["test-workspace"]

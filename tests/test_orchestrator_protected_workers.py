@@ -41,7 +41,7 @@ def test_protected_mock_workers_claim_unique_slots_and_never_resend_unknown(
     monkeypatch.setattr(
         storage_policy_module,
         "_private_database_pin",
-        lambda path, *, create: nullcontext(),
+        lambda path, *, create, pin_rollback_journal=False: nullcontext(),
     )
     policy = storage_policy_module.PrivateStoragePolicy.open("portable-test")
 

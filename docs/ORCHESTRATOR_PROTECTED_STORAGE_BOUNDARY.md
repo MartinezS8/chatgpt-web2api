@@ -43,10 +43,27 @@ Model 2 is a hostile process able to rename or replace relevant objects between
 checks and use. It remains unsupported. Repeated checks and cooperative locks
 do not make path-based sqlite3/open/link/replace/unlink handle-relative.
 Holding a Windows identity handle does not bind Python SQLite's independently
-opened DB/WAL/SHM paths. A comprehensive solution would require a larger native
-I/O/VFS design and adversarial testing. A subsequent scoped main-file lifetime
-pin is documented in `ORCHESTRATOR_WINDOWS_DATABASE_PIN.md`; it does not change
-the unsupported Model 2 status or bind SQLite sidecars to native handles.
+opened paths. The protected policy pins main, WAL and SHM names for selected
+SQLite sessions. Store migration also pins its rollback journal while using
+PERSIST mode for that migration connection. Other journal, ancestor, staging
+and publication operations are not bound to a verified directory handle. A
+comprehensive solution would require a larger native I/O/VFS design and
+adversarial testing; Model 2 remains unsupported.
+
+When Windows startup finds a nonempty regular rollback journal, SQLite first
+recovers it while the main database and WAL/SHM names remain pinned but the
+journal name is unpinned so DELETE-mode recovery can remove it. The migration
+connection then pins the journal before opening SQLite. That recovery preflight
+uses a path-based journal check; hostile swaps during that narrow window remain
+unsupported.
+
+Protected Store construction is serialized by a SID- and database-path-keyed
+named mutex within one Windows session. It is held from before SQLite pins
+through migration and WAL promotion. This handles simultaneous initializers
+that follow the protected API, including abandoned owners, but is not an ACL or
+hostile-process boundary. Raw SQLite/legacy callers, other sessions and
+processes that bypass or pre-create the mutex are outside this coordination
+guarantee.
 
 Effective denial to a restricted second user remains NOT TESTED without an
 already authorized test token. No account/ACL outside disposable test roots

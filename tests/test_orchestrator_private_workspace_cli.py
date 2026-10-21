@@ -37,7 +37,7 @@ def private(tmp_path, monkeypatch):
     monkeypatch.setattr(
         storage_policy_module,
         "_private_database_pin",
-        lambda path, *, create: nullcontext(),
+        lambda path, *, create, pin_rollback_journal=False: nullcontext(),
     )
     return ctx
 

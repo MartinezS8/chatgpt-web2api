@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import secrets
 import sqlite3
+import stat
 import time
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
@@ -49,10 +51,11 @@ _CLAIMED_STATES = (
 
 
 def _enable_wal(db) -> None:
-    """Bounded retry of WAL promotion when parallel initializers hold locks.
+    """Bounded retry of WAL promotion when parallel initializers overlap.
 
     SQLite's busy handler does not cover every journal-mode lock upgrade.
-    Retry only native BUSY/LOCKED codes, never corruption or I/O failures.
+    Retry only BUSY/LOCKED codes; corruption and all I/O failures remain
+    immediate errors.
     """
     deadline = time.monotonic() + 10
     while True:
@@ -121,7 +124,12 @@ class Store:
             from .storage_policy import checked_policy
             checked_policy(storage_policy).database(database)
         self.path = str(database)
-        self._initialize()
+        initialization = (
+            self.storage_policy.database_initialization(self.path)
+            if self.storage_policy is not None else nullcontext()
+        )
+        with initialization:
+            self._initialize()
 
     @property
     def storage_policy(self):
@@ -132,14 +140,17 @@ class Store:
         return "protected-private" if self.storage_policy is not None else "legacy"
 
     @contextmanager
-    def _connect(self, *, set_wal: bool = True):
+    def _connect(self, *, set_wal: bool = True, pin_rollback_journal: bool = False):
         if self.storage_policy is not None:
             from .storage_policy import checked_policy
             checked_policy(self.storage_policy).database(self.path)
-        pin = (self.storage_policy.database_session(self.path, create=True)
-               if self.storage_policy is not None else nullcontext())
+        pin = (self.storage_policy.database_session(
+            self.path, create=True, pin_rollback_journal=pin_rollback_journal,
+        ) if self.storage_policy is not None else nullcontext())
         with pin:
-            with self._open_connection(set_wal=set_wal) as db:
+            with self._open_connection(
+                set_wal=set_wal,
+            ) as db:
                 yield db
 
     @contextmanager
@@ -165,6 +176,31 @@ class Store:
         finally:
             db.close()
 
+    def _rollback_journal_requires_recovery(self) -> bool:
+        """Detect an existing journal SQLite must inspect before pinning.
+
+        Windows SQLite hot-journal recovery can delete the rollback journal. A
+        no-delete handle would block that recovery, so a nonempty existing
+        journal is checked first while database/WAL handles remain pinned.
+        Hostile path swaps during this recovery window remain unsupported.
+        """
+        if self.storage_policy is None or os.name != "nt":
+            return False
+        journal = Path(self.path + "-journal")
+        try:
+            metadata = journal.lstat()
+        except FileNotFoundError:
+            return False
+        attributes = getattr(metadata, "st_file_attributes", 0)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or attributes & 0x400  # FILE_ATTRIBUTE_REPARSE_POINT
+            or metadata.st_nlink != 1
+        ):
+            raise ValueError("protected rollback journal must be a singly linked regular file")
+        return metadata.st_size > 0
+
     def _initialize(self):
         """Upgrade the task-store schema in one rollback-safe SQLite transaction.
 
@@ -172,7 +208,39 @@ class Store:
         databases are migrated conservatively: ambiguous active owners go to
         NEEDS_HUMAN instead of being requeued or implicitly authorized.
         """
-        with self._connect(set_wal=False) as db:
+        if self._rollback_journal_requires_recovery():
+            # SQLite must be able to delete a hot journal during recovery. This
+            # connection therefore pins the database and WAL/SHM paths but not
+            # -journal. Once recovery closes, the migration connection pins
+            # the journal before its SQLite open and schema writes.
+            with self._connect(set_wal=False) as recovery_db:
+                recovery_check = recovery_db.execute("PRAGMA quick_check").fetchone()
+                if recovery_check is None or recovery_check[0] != "ok":
+                    raise ValueError("SQLite integrity check failed during journal recovery")
+                if recovery_db.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                    raise ValueError("SQLite foreign-key violations during journal recovery")
+
+        with self._connect(
+            set_wal=False,
+            pin_rollback_journal=self.storage_policy is not None,
+        ) as db:
+            if self.storage_policy is not None:
+                # A protected legacy database may still be in DELETE mode.
+                # Check it before changing journal mode, then use PERSIST for
+                # the migration so commit does not unlink the pinned journal.
+                # Existing hot journals are recovered before this connection
+                # acquires the rollback-journal pin.
+                preflight = db.execute("PRAGMA quick_check").fetchone()
+                if preflight is None or preflight[0] != "ok":
+                    raise ValueError("SQLite integrity check failed; no migration performed")
+                if db.execute("PRAGMA foreign_key_check").fetchone() is not None:
+                    raise ValueError("SQLite foreign-key violations; no migration performed")
+                mode_row = db.execute("PRAGMA journal_mode").fetchone()
+                mode = str(mode_row[0]).lower() if mode_row is not None else ""
+                if mode != "wal":
+                    persisted = db.execute("PRAGMA journal_mode=PERSIST").fetchone()
+                    if persisted is None or str(persisted[0]).lower() != "persist":
+                        raise ValueError("SQLite refused protected migration journal mode")
             # Hold a writer reservation across integrity/version checks and
             # migration so another process cannot change the inspected state
             # between preflight and schema writes.
