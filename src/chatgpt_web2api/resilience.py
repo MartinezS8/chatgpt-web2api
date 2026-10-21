@@ -24,20 +24,17 @@ import asyncio
 import logging
 import random
 from collections.abc import Awaitable, Callable
-from typing import TypeVar
 
 from .cdp_driver import RATE_LIMIT_DEFAULT_RETRY_AFTER, RateLimitError
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 # Cap on a single backoff wait (seconds), even if retry_after reports more.
 # Prevents a pathological reported value from stalling a request for minutes.
 _DEFAULT_CAP = 120
 
 
-async def retry_on_rate_limit(
+async def retry_on_rate_limit[T](
     driver,
     factory: Callable[[], Awaitable[T]],
     max_attempts: int = 3,

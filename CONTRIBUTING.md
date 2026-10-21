@@ -4,6 +4,11 @@ Thanks for your interest! This project is a CDP-driven reverse proxy for ChatGPT
 
 ## Quick Start
 
+The supported development target is Windows 11 x64 / CPython 3.12.x.
+For the offline orchestrator use [Windows setup](docs/WINDOWS_312_LOCAL_SETUP.md).
+No Chrome account or live proxy is required for offline tests. The original
+browser-proxy workflow below requires separate authorization before use.
+
 ```bash
 git clone https://github.com/Elephant-Rock-Lab/ChatGPT-Web2API.git
 cd ChatGPT-Web2API
@@ -37,7 +42,7 @@ Open an [issue](https://github.com/Elephant-Rock-Lab/ChatGPT-Web2API/issues) wit
 
 ### Code Style
 
-- Python 3.11+, type hints preferred
+- CPython 3.12.x on Windows 11 x64, type hints preferred
 - Async everywhere (`async/await`, no blocking calls in event loop)
 - Docstrings on public functions and classes
 - Keep the CDP driver methods pure — business logic belongs in `mcp_server.py` or `api_server.py`

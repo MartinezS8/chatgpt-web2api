@@ -7,7 +7,7 @@ name = "chatgpt-web2api"
 version = "0.2.0"
 description = "OpenAI-compatible API proxy and MCP server for ChatGPT web — drives Chrome via CDP"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.13"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
@@ -18,8 +18,8 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Operating System :: Microsoft :: Windows :: Windows 11",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Internet :: WWW/HTTP",
 ]
@@ -59,7 +59,7 @@ packages = ["src/chatgpt_web2api"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 # Starter set: pycodestyle errors, pyflakes, isort, pyupgrade. Bugbear (B)
