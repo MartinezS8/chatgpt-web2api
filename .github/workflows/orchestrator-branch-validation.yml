@@ -47,6 +47,11 @@ jobs:
       - name: Diagnose newly created object owners (Git Bash)
         shell: bash
         run: python scripts/diagnose_windows_owner.py
+      - name: Focused native private-storage preflight
+        shell: pwsh
+        run: |
+          python -m pytest -q -p no:cacheprovider tests/test_orchestrator_windows_database_pin.py::test_protected_store_pins_before_sqlite_open
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Full non-E2E verification against pushed Git SHA
         shell: pwsh
         env:
