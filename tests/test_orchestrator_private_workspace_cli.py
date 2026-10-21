@@ -5,11 +5,13 @@ routing/containment. They do not claim effective Windows ACL or TOCTOU proof.
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
 
 import chatgpt_web2api.orchestrator.cli as cli
+import chatgpt_web2api.orchestrator.storage_policy as storage_policy_module
 from chatgpt_web2api.orchestrator.private_workspace import PrivateStorageContext
 from chatgpt_web2api.orchestrator.store import Store
 
@@ -29,7 +31,14 @@ def private(tmp_path, monkeypatch):
         return ctx
 
     monkeypatch.setattr(cli, "load_private_workspace", trusted_loader)
-    monkeypatch.setattr("chatgpt_web2api.orchestrator.storage_policy.load_private_workspace", trusted_loader)
+    monkeypatch.setattr(storage_policy_module, "load_private_workspace", trusted_loader)
+    # This tmp-path fixture covers portable CLI routing only; native ACL/pin
+    # behavior has separate Windows tests.
+    monkeypatch.setattr(
+        storage_policy_module,
+        "_private_database_pin",
+        lambda path, *, create, pin_rollback_journal=False: nullcontext(),
+    )
     return ctx
 
 

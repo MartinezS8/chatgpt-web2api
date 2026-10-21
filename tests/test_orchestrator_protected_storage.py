@@ -1,6 +1,7 @@
 """Offline tests for the explicit private-workspace storage boundary."""
 from __future__ import annotations
 
+from contextlib import nullcontext
 from pathlib import Path
 
 import pytest
@@ -36,6 +37,13 @@ def _install_loader(monkeypatch, context: PrivateStorageContext):
         return context
 
     monkeypatch.setattr(storage_policy_module, "load_private_workspace", load)
+    # These tmp-path fixtures cover portable policy contracts only; native
+    # ACL and database-pin behavior has separate Windows tests.
+    monkeypatch.setattr(
+        storage_policy_module,
+        "_private_database_pin",
+        lambda path, *, create, pin_rollback_journal=False: nullcontext(),
+    )
     return calls
 
 
@@ -70,6 +78,12 @@ def test_policy_reloads_native_context_and_rejects_a_forged_context(
         return current[0]
 
     monkeypatch.setattr(storage_policy_module, "load_private_workspace", load)
+    # This fixture uses synthetic contexts; native ACL/pin checks are separate.
+    monkeypatch.setattr(
+        storage_policy_module,
+        "_private_database_pin",
+        lambda path, *, create, pin_rollback_journal=False: nullcontext(),
+    )
     policy = storage_policy_module.PrivateStoragePolicy.open("test-workspace")
     assert calls == ["test-workspace"]
     assert policy.check() is trusted

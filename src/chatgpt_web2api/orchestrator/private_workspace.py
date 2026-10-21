@@ -14,11 +14,20 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .storage_hardening import parse_current_user_sid, reject_reparse_path
-from .windows_acl import read_windows_descriptor, validate_private_descriptor
+from .windows_acl import (
+    read_windows_descriptor,
+    validate_private_child_descriptor,
+    validate_private_descriptor,
+)
 
 _LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,39}\Z")
-_ALLOWED_SIDS = {"S-1-5-18"}
-_FULL_CONTROL = 0x1F01FF
+_SQLITE_SIDECARS = frozenset({"controller.sqlite3-wal", "controller.sqlite3-shm",
+                            "controller.sqlite3-journal"})
+
+
+class _SidecarDisappeared(Exception):
+    def __init__(self, original: FileNotFoundError):
+        self.original = original
 
 
 @dataclass(frozen=True)
@@ -75,18 +84,26 @@ def _check_child_acl(path: Path, sid: str) -> None:
     reject_reparse_path(
         path, error_message="private workspace child traverses reparse point"
     )
-    desc = read_windows_descriptor(path)
-    if desc.get("owner_sid") != sid:
-        raise PermissionError("private workspace child has an unexpected owner")
-    aces = desc.get("aces", [])
-    wanted = {sid, *_ALLOWED_SIDS}
-    if (not aces or {a.get("sid") for a in aces} != wanted
-            or any(a.get("type") != 0 or not isinstance(a.get("mask"), int)
-                   or a["mask"] & ~_FULL_CONTROL for a in aces)):
-        raise PermissionError("private workspace child grants unexpected access")
+    validate_private_child_descriptor(read_windows_descriptor(path), sid)
 
 
 def load_private_workspace(label: str) -> PrivateStorageContext:
+    """Retry complete native validation only for a vanished SQLite sidecar.
+
+    SQLite removes sidecars during normal last-close/checkpoint activity.
+    Never skip a child check or suppress ACL/type/I/O failures. Persistent
+    inventory instability fails closed after three full validation attempts.
+    """
+    for attempt in range(3):
+        try:
+            return _load_private_workspace_once(label)
+        except _SidecarDisappeared as exc:
+            if attempt == 2:
+                raise exc.original from exc
+    raise AssertionError("unreachable private workspace validation")
+
+
+def _load_private_workspace_once(label: str) -> PrivateStorageContext:
     """Reopen one *existing* Windows-only provisioned workspace, without repair.
 
     Refuse an arbitrary --db/--blob-root instead of granting it a private
@@ -132,8 +149,13 @@ def load_private_workspace(label: str) -> PrivateStorageContext:
         for child in directory.iterdir():
             if child == blobs:
                 continue
-            reject_reparse_path(child, error_message="private child traverses reparse point")
-            if not stat.S_ISREG(child.lstat().st_mode):
-                raise ValueError("private workspace contains unsupported child directory/type")
-            _check_child_acl(child, sid)
+            try:
+                reject_reparse_path(child, error_message="private child traverses reparse point")
+                if not stat.S_ISREG(child.lstat().st_mode):
+                    raise ValueError("private workspace contains unsupported child directory/type")
+                _check_child_acl(child, sid)
+            except FileNotFoundError as exc:
+                if directory == canonical and child.name in _SQLITE_SIDECARS:
+                    raise _SidecarDisappeared(exc) from exc
+                raise
     return PrivateStorageContext(canonical, database, blobs)
