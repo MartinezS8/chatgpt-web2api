@@ -51,7 +51,10 @@ jobs:
         env:
           REVIEWED_HEAD_SHA: ${{ github.sha }}
           W2A_E2E_RUN: '0'
-        run: python scripts/verify_orchestrator.py --full --strict --diagnostics --expected-sha "$REVIEWED_HEAD_SHA"
+        # Native Windows pin/close and process-recovery tests can exceed the
+        # verifier's default 600 seconds. Match the documented local budget;
+        # retain the same complete suite, strict lint and exact-SHA checks.
+        run: python scripts/verify_orchestrator.py --full --strict --diagnostics --expected-sha "$REVIEWED_HEAD_SHA" --timeout 1200
 
   package-build:
     name: package build (diagnostic)
