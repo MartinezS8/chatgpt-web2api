@@ -37,6 +37,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip install -e '.[dev]'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Diagnose newly created object owners (PowerShell)
+        shell: pwsh
+        run: |
+          $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+          Write-Output "Token owner equals user: $($identity.Owner.Value -eq $identity.User.Value)"
+          python scripts/diagnose_windows_owner.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Diagnose newly created object owners (Git Bash)
+        shell: bash
+        run: python scripts/diagnose_windows_owner.py
       - name: Full non-E2E verification against pushed Git SHA
         shell: pwsh
         env:
