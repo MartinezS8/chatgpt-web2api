@@ -26,9 +26,9 @@ def test_only_feature_branch_pushes_trigger_diagnostics():
 def test_action_refs_are_full_immutable_commit_ids():
     content = WORKFLOW.read_text(encoding="utf8")
     actions = re.findall(r"(?m)^\s*-?\s*uses: ([^\s#]+)", content)
-    assert len(actions) == 4
-    assert actions.count(f"actions/checkout@{CHECKOUT_SHA}") == 2
-    assert actions.count(f"actions/setup-python@{SETUP_SHA}") == 2
+    assert len(actions) == 6
+    assert actions.count(f"actions/checkout@{CHECKOUT_SHA}") == 3
+    assert actions.count(f"actions/setup-python@{SETUP_SHA}") == 3
     assert all(re.fullmatch(r"actions/(checkout|setup-python)@[a-f0-9]{40}", a)
                for a in actions)
 
@@ -43,18 +43,18 @@ def test_diagnostics_use_read_only_github_token_and_no_secrets():
     assert "pull-requests: write" not in content
 
 
-def test_all_os_python_combinations_run_full_exact_head_gate():
+def test_windows312_runs_full_exact_head_gate_without_unsupported_matrix():
     content = WORKFLOW.read_text(encoding="utf8")
-    assert "ubuntu-latest, windows-latest, macos-latest" in content
-    assert "python: ['3.11', '3.12']" in content
-    assert "fail-fast: false" in content
+    assert content.count("runs-on: windows-latest") == 3
+    assert content.count("python-version: '3.12'") == 3
+    assert "matrix:" not in content
     assert "REVIEWED_HEAD_SHA: ${{ github.sha }}" in content
     # Explicit diagnostics can be placed between the strict flag and SHA;
     # only exact-SHA, full-suite and strict requirements are authoritative.
     assert "verify_orchestrator.py --full --strict " in content
     assert '--expected-sha "$REVIEWED_HEAD_SHA"' in content
     assert "W2A_E2E_RUN: '0'" in content
-    assert "needs: offline-suite" in content
+    assert "needs: [offline-suite, secret-scan]" in content
 
 
 def test_authoritative_standard_ci_is_not_expanded_or_replaced():

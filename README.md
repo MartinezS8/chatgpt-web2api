@@ -10,7 +10,7 @@ One command starts a Chrome browser, logs into ChatGPT, and exposes an OpenAI-co
 [![CI](https://github.com/Elephant-Rock-Lab/ChatGPT-Web2API/actions/workflows/ci.yml/badge.svg)](https://github.com/Elephant-Rock-Lab/ChatGPT-Web2API/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Elephant-Rock-Lab/ChatGPT-Web2API)](https://github.com/Elephant-Rock-Lab/ChatGPT-Web2API/releases)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
 [![Tests](https://img.shields.io/badge/tests-29%20passing-brightgreen)](https://github.com/Elephant-Rock-Lab/ChatGPT-Web2API/actions)
 
 </div>
@@ -18,6 +18,22 @@ One command starts a Chrome browser, logs into ChatGPT, and exposes an OpenAI-co
 ---
 
 ## Why This Exists
+
+### Supported local orchestrator environment
+
+This development stack supports **Windows 11 x64 and CPython 3.12.x only**.
+See [Windows 3.12 local setup](docs/WINDOWS_312_LOCAL_SETUP.md) for isolated
+installation, exact-SHA offline verification and installed-wheel checks.
+Other Python versions and Linux/macOS are currently unsupported; historical
+cross-platform instructions below describe the original browser proxy.
+
+The orchestrator is currently an **offline mock system** for cooperating
+processes in a validated private workspace (Model 1). It has no authorized
+real-worker transport. The browser proxy commands shown below are separate
+legacy functionality and are not part of the safe offline setup.
+Same-user hostile filesystem swaps (Model 2) remain **FAIL**; effective
+second-user access denial is **NOT TESTED**. CI is developer diagnostic
+evidence, not a production or provider authorization.
 
 You have a **ChatGPT Plus subscription** but want to use it programmatically:
 
@@ -469,7 +485,7 @@ Use `list_models` to get the current catalog.
 
 ## Requirements
 
-- Python 3.11+
+- Windows 11 x64 with CPython 3.12.x
 - Chrome or Chromium installed
 - ChatGPT Plus subscription
 

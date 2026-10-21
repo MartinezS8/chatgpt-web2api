@@ -77,6 +77,16 @@ def test_wrong_sha_refuses_execution(checkout, monkeypatch, capsys):
     assert not data["tests_started"] and not calls
 
 
+@pytest.mark.parametrize("version", [(3, 11, 9), (3, 13, 0)])
+def test_unsupported_interpreter_refuses_before_test_commands(monkeypatch, capsys, version):
+    monkeypatch.setattr(checker.sys, "version_info", version)
+    calls = fake_checks(monkeypatch)
+    assert checker.main([]) == 2
+    data = output(capsys)
+    assert not data["tests_started"] and not calls
+    assert "3.12" in data["error"]
+
+
 def test_uncommitted_changes_refuse_strict_gate(checkout, monkeypatch, capsys):
     root, sha = checkout
     (root / "unexpected.txt").write_text("new file", encoding="utf8")

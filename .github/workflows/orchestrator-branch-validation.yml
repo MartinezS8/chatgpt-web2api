@@ -1,6 +1,6 @@
 # Untrusted developer-branch diagnostics. Not the protected CI policy.
-# This workflow is source-controlled on feature branches and MUST NOT grant
-# task completion, reviewer approval, release, finalization, or provider writes.
+# This workflow cannot grant task completion, reviewer approval, release,
+# finalization, or provider writes.
 name: Orchestrator branch validation
 
 on:
@@ -17,64 +17,121 @@ concurrency:
 
 jobs:
   offline-suite:
-    name: offline / ${{ matrix.os }} / Python ${{ matrix.python }}
-    runs-on: ${{ matrix.os }}
+    name: strict offline / Windows / Python 3.12
+    runs-on: windows-latest
     timeout-minutes: 35
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-        python: ['3.11', '3.12']
     steps:
       - name: Checkout exactly the pushed revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2 (immutable Git commit)
         with:
           persist-credentials: false
           fetch-depth: 1
-      - name: Install selected Python
+      - name: Set up Python 3.12
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0 (immutable Git commit)
         with:
-          python-version: ${{ matrix.python }}
+          python-version: '3.12'
       - name: Install developer dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m pip install -e '.[dev]'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Diagnose newly created object owners (PowerShell)
+        shell: pwsh
+        run: |
+          $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+          Write-Output "Token owner equals user: $($identity.Owner.Value -eq $identity.User.Value)"
+          python scripts/diagnose_windows_owner.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Diagnose newly created object owners (Git Bash)
         shell: bash
-        run: python -m pip install -e '.[dev]'
-      # Read-only lint investigation: the proposal is never applied in CI.
-      # This diagnostic cannot override the strict lint gate below.
-      - name: Ruff inventory and safe-fix diff (diagnostic only)
-        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.11'
+        run: python scripts/diagnose_windows_owner.py --require-user-owner
+      - name: Focused native private-storage preflight
+        # Git Bash launches children with the user as default object owner;
+        # hosted pwsh may use Administrators. Keep exact owner checks intact.
         shell: bash
         run: |
-          python -m ruff check src/ tests/ --output-format concise || true
-          python -m ruff check src/ tests/ --fix --diff || true
+          python -m pytest -q -p no:cacheprovider tests/test_orchestrator_windows_database_pin.py::test_protected_store_pins_before_sqlite_open
       - name: Full non-E2E verification against pushed Git SHA
         shell: bash
         env:
           REVIEWED_HEAD_SHA: ${{ github.sha }}
           W2A_E2E_RUN: '0'
-        # Native Windows pin/close and process-recovery tests can exceed the
-        # verifier's default 600 seconds. Match the documented local budget;
-        # retain the same complete suite, strict lint and exact-SHA checks.
-        run: python scripts/verify_orchestrator.py --full --strict --diagnostics --expected-sha "$REVIEWED_HEAD_SHA" --timeout 1200
+        run: |
+          python scripts/verify_orchestrator.py --full --strict --diagnostics --expected-sha "$REVIEWED_HEAD_SHA" --timeout 1200
+
+  secret-scan:
+    name: full-history Gitleaks scan / Windows
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout full Git history
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2 (immutable Git commit)
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0 (immutable Git commit)
+        with:
+          python-version: '3.12'
+      - name: Run verified Gitleaks release
+        shell: pwsh
+        run: |
+          & "$env:GITHUB_WORKSPACE/scripts/scan_secrets_windows.ps1" -SourcePath $env:GITHUB_WORKSPACE
 
   package-build:
-    name: package build (diagnostic)
-    needs: offline-suite
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    name: external distribution build and installed CLI smokes / Windows / Python 3.12
+    needs: [offline-suite, secret-scan]
+    runs-on: windows-latest
+    timeout-minutes: 25
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Checkout exactly the pushed revision
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2 (immutable Git commit)
         with:
           persist-credentials: false
           fetch-depth: 1
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0 (immutable Git commit)
         with:
-          python-version: '3.11'
-      - name: Build wheel and source distribution
+          python-version: '3.12'
+      - name: Build wheel and source distribution outside the checkout
+        shell: pwsh
         run: |
-          python -m pip install build
-          python -m build
-      - name: Install and smoke-test the built wheel
+          $distDirectory = Join-Path $env:RUNNER_TEMP 'w2a-dist'
+          New-Item -ItemType Directory -Path $distDirectory -Force | Out-Null
+          python -m pip install --upgrade pip build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m build --sdist --wheel --outdir $distDirectory
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $wheels = @(Get-ChildItem -LiteralPath $distDirectory -Filter '*.whl' -File)
+          $sdists = @(Get-ChildItem -LiteralPath $distDirectory -Filter '*.tar.gz' -File)
+          if ($wheels.Count -ne 1 -or $sdists.Count -ne 1) { throw 'Expected exactly one wheel and one source distribution.' }
+      - name: Install wheel into a fresh Python 3.12 environment and smoke CLIs
+        shell: pwsh
         run: |
-          python -m pip install dist/*.whl
-          chatgpt-web2api --help
-          chatgpt-web2api-mcp --help
+          $smokeVenv = Join-Path $env:RUNNER_TEMP 'w2a-wheel-smoke'
+          python -m venv $smokeVenv
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $wheelPython = Join-Path $smokeVenv 'Scripts/python.exe'
+          $wheel = @(Get-ChildItem -LiteralPath (Join-Path $env:RUNNER_TEMP 'w2a-dist') -Filter '*.whl' -File)
+          if ($wheel.Count -ne 1) { throw 'Expected exactly one wheel from the external build directory.' }
+          & $wheelPython -m pip install --upgrade pip
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $wheelPython -m pip install $wheel[0].FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $commands = @(
+            'chatgpt-web2api.exe',
+            'chatgpt-web2api-mcp.exe',
+            'chatgpt-orchestrator-observer-mcp.exe'
+          )
+          foreach ($command in $commands) {
+            $commandPath = Join-Path $smokeVenv "Scripts/$command"
+            if (-not (Test-Path -LiteralPath $commandPath -PathType Leaf)) { throw "Installed command is missing: $command" }
+            & $commandPath --help
+            if ($LASTEXITCODE -ne 0) { throw "Installed command help failed: $command" }
+          }
+          & $wheelPython -m chatgpt_web2api.orchestrator --help
+          if ($LASTEXITCODE -ne 0) { throw 'Installed orchestrator module help failed.' }
+          & $wheelPython -m chatgpt_web2api.orchestrator capabilities
+          if ($LASTEXITCODE -ne 0) { throw 'Installed orchestrator capabilities smoke failed.' }

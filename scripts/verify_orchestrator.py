@@ -106,6 +106,8 @@ def main(argv: list[str] | None = None) -> int:
                 "platform": platform.system(), "python": platform.python_version(),
                 "diagnostics_enabled": args.diagnostics}
     try:
+        if sys.implementation.name != "cpython" or sys.version_info[:2] != (3, 12):
+            raise ValueError("CPython 3.12.x is the only supported validation interpreter")
         if not 5 <= args.timeout <= 3600:
             raise ValueError("--timeout must be between 5 and 3600 seconds")
         if args.strict and args.skip_lint:
