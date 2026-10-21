@@ -32,8 +32,8 @@ def security_gate(rows):
 
 
 def classify(*, reached, winerror, marker_changed, protected_changed, path_changed=False,
-             error=None):
-    if marker_changed or protected_changed or path_changed:
+             write_succeeded=False, error=None):
+    if marker_changed or protected_changed or path_changed or write_succeeded:
         return "REPRODUCED_UNSAFE"
     if reached and winerror == 32 and error is None:
         return "BLOCKED"
@@ -50,7 +50,7 @@ def _probe(surface):
     from .store import Store
 
     workspace = create_private_windows_workspace("audit-" + uuid.uuid4().hex)
-    result = None
+    result = dict(surface=surface, status="NOT_TESTED")
     try:
         workspace.blobs.mkdir()
         policy = PrivateStoragePolicy.open(workspace.root.name)
@@ -82,6 +82,7 @@ def _probe(surface):
             marker = Path(external).resolve() / "synthetic-marker.bin"
             marker.write_bytes(b"SYNTHETIC OUTSIDE MARKER")
             before = _digest(marker)
+            result["outside_before"] = before
             observations = []
             original = sqlite3.connect
 
@@ -91,23 +92,30 @@ def _probe(surface):
                     program = '''import json, pathlib, sys
 target, marker = map(pathlib.Path, sys.argv[1:3])
 unlinked = False
+wrote = False
 try:
     if sys.argv[3] == "content_write":
         with target.open("r+b") as stream:
             stream.write(b"SYNTHETIC CONTENT CHANGE")
+        wrote = True
     else:
         target.unlink()
         unlinked = True
         target.symlink_to(marker)
-    print(json.dumps({"winerror": None, "unlinked": unlinked}))
+    print(json.dumps({"winerror": None, "unlinked": unlinked, "wrote": wrote}))
 except OSError as error:
-    print(json.dumps({"winerror": getattr(error, "winerror", None), "unlinked": unlinked}))
+    print(json.dumps({"winerror": getattr(error, "winerror", None),
+                      "unlinked": unlinked, "wrote": wrote}))
 '''
                     child = subprocess.run(
                         [sys.executable, "-c", program, str(target), str(marker), surface],
                         capture_output=True, text=True, timeout=20, check=True,
                     )
                     observation = json.loads(child.stdout)
+                    observations.append(observation)
+                    result.update(observation)
+                    if observation.get("unlinked") or observation.get("wrote"):
+                        result["status"] = "REPRODUCED_UNSAFE"
                     try:
                         protected_after = _digest(target)
                     except OSError:
@@ -116,7 +124,6 @@ except OSError as error:
                         protected_before=protected_before,
                         protected_after=protected_after,
                     )
-                    observations.append(observation)
                 return original(*args, **kwargs)
 
             error = None
@@ -126,6 +133,7 @@ except OSError as error:
             except Exception as exc:
                 # Errors do not establish prevention: a marker may already differ.
                 error = type(exc).__name__
+                result["operation_error"] = error
             after = _digest(marker)
             observation = observations[0] if observations else {}
             rollback_lost = False
@@ -149,6 +157,7 @@ except OSError as error:
                           else observation.get("winerror")),
                 marker_changed=before != after,
                 path_changed=observation.get("unlinked", False),
+                write_succeeded=observation.get("wrote", False),
                 protected_changed=(rollback_lost or (surface == "content_write" and
                                    observation.get("protected_before")
                                    != observation.get("protected_after"))),
@@ -161,8 +170,6 @@ except OSError as error:
                         operation_error=error, **observation)
             return result
     except Exception as exc:
-        if result is None:
-            raise
         result["post_observation_error"] = type(exc).__name__
         return result
     finally:
@@ -170,9 +177,8 @@ except OSError as error:
         try:
             shutil.rmtree(workspace.root)
         except OSError as exc:
-            if result is not None:
-                result["cleanup_error"] = type(exc).__name__
-                result["retained_synthetic_workspace"] = str(workspace.root)
+            result["cleanup_error"] = type(exc).__name__
+            result["retained_synthetic_workspace"] = str(workspace.root)
             # Preserve an original probe error, or the already computed row.
 
 

@@ -32,6 +32,8 @@ def test_postflight_exception_cannot_hide_a_write():
     assert classify(reached=True, winerror=None, marker_changed=False,
                     protected_changed=False, path_changed=True,
                     error="ValueError") == "REPRODUCED_UNSAFE"
+    assert classify(reached=True, winerror=None, marker_changed=False,
+                    protected_changed=False, write_succeeded=True) == "REPRODUCED_UNSAFE"
 
 
 def test_other_errors_and_unreached_hooks_are_not_protection():
@@ -79,3 +81,43 @@ def test_cleanup_failure_preserves_unsafe_evidence(monkeypatch):
     finally:
         for path in retained:
             original(path)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows disposable probe")
+def test_marker_postflight_failure_preserves_attacker_observation(monkeypatch):
+    original = storage_audit._digest
+    marker_reads = []
+
+    def failing_digest(path):
+        if path.name == "synthetic-marker.bin":
+            marker_reads.append(path)
+            if len(marker_reads) == 2:
+                raise PermissionError("synthetic marker postflight failure")
+        return original(path)
+
+    monkeypatch.setattr(storage_audit, "_digest", failing_digest)
+    row = storage_audit._probe("content_write")
+    assert row["status"] == "REPRODUCED_UNSAFE"
+    assert row["wrote"] is True
+    assert row["post_observation_error"] == "PermissionError"
+    assert row["operation_error"] == "DatabaseError"
+    assert row["outside_before"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows disposable probe")
+@pytest.mark.parametrize("surface", ["main", "wal", "shm", "migration_journal"])
+def test_native_preopen_replacement_is_blocked(surface):
+    row = storage_audit._probe(surface)
+    assert row["status"] == "BLOCKED"
+    assert row["unlinked"] is False
+    assert row["winerror"] == 32
+    assert row["outside_before"] == row["outside_after"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows disposable probe")
+def test_hot_recovery_path_change_is_reported_despite_late_failure():
+    row = storage_audit._probe("hot_recovery_journal")
+    assert row["status"] == "REPRODUCED_UNSAFE"
+    assert row["unlinked"] is True
+    assert row["hook"] == "before_sqlite_journal_recovery"
+    assert row["outside_before"] == row["outside_after"]
