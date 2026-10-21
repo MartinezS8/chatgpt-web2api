@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+import chatgpt_web2api.orchestrator.private_workspace as private_workspace_module
 from chatgpt_web2api.orchestrator.observer import Observer
 from chatgpt_web2api.orchestrator.storage_hardening import (
     create_private_windows_workspace,
@@ -235,3 +236,55 @@ def test_pin_rejects_network_namespace_before_creating_files():
     with pytest.raises(ValueError, match="local drive"):
         with pin_database(Path(r"\\synthetic-invalid-host\share\missing.sqlite3"), create=True):
             pytest.fail("network paths must not enter native acquisition")
+
+
+@pytest.mark.parametrize("fault", ["once", "always", "permission", "source"])
+def test_native_inventory_restarts_only_for_disappearing_sidecars(monkeypatch, fault):
+    workspace = create_private_windows_workspace("pin-scan-" + uuid.uuid4().hex[:10])
+    try:
+        workspace.blobs.mkdir()
+        root = workspace.root.resolve(strict=True)
+        sidecar = root / ("source.txt" if fault == "source" else "controller.sqlite3-shm")
+        sidecar.write_bytes(b"synthetic-not-live-shm")
+        original = private_workspace_module._check_child_acl
+        attempts = []
+        scans = []
+        original_load = private_workspace_module._load_private_workspace_once
+
+        def load(label):
+            scans.append(label)
+            return original_load(label)
+
+        monkeypatch.setattr(private_workspace_module, "_load_private_workspace_once", load)
+
+        def inspect(path, sid):
+            if path == sidecar:
+                attempts.append(True)
+                if fault == "permission":
+                    raise PermissionError("synthetic ACL denial")
+                if fault == "always":
+                    raise FileNotFoundError(2, "synthetic sidecar disappearance", str(path))
+                sidecar.unlink()
+            return original(path, sid)
+
+        monkeypatch.setattr(private_workspace_module, "_check_child_acl", inspect)
+        if fault == "once":
+            result = private_workspace_module.load_private_workspace(workspace.root.name)
+            assert result.root == root
+            assert len(attempts) == 1
+            assert len(scans) == 2, "retry must repeat the entire native validation"
+        elif fault == "always":
+            with pytest.raises(FileNotFoundError):
+                private_workspace_module.load_private_workspace(workspace.root.name)
+            assert len(attempts) == 3, "unstable sidecars must fail after bounded full scans"
+            assert len(scans) == 3
+        elif fault == "source":
+            with pytest.raises(FileNotFoundError):
+                private_workspace_module.load_private_workspace(workspace.root.name)
+            assert len(attempts) == len(scans) == 1
+        else:
+            with pytest.raises(PermissionError, match="synthetic ACL denial"):
+                private_workspace_module.load_private_workspace(workspace.root.name)
+            assert len(attempts) == 1, "ACL denial must not be retried or ignored"
+    finally:
+        shutil.rmtree(workspace.root)

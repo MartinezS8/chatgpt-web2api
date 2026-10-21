@@ -44,6 +44,14 @@ A comprehensive native VFS or broker remains a separate design/test gate.
 Do not precreate or permanently lock journals without proving SQLite recovery
 behavior. WAL sidecar lifetime also differs after crashes/read-only clients.
 
+Native five-Store concurrency exposed a disappearing SHM during the existing
+ACL inventory. The loader now restarts the complete native validation at most
+three times, only if an exact main-DB WAL/SHM/journal child disappears during
+inspection. It never skips a child validation. Persistent instability raises
+the original FileNotFoundError; missing sources, ACL denials, reparse/type and
+other I/O errors are not retried or ignored. Four additional regression cases
+cover successful complete retry, bounded failure, ACL denial and missing source.
+
 | Gate | Status |
 | --- | --- |
 | Windows handle identity | PARTIAL: main-file observation/lifetime only |
