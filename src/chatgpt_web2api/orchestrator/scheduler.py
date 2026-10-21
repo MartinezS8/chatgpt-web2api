@@ -27,12 +27,18 @@ class Scheduler:
 
     def claim_next(self, account_id: str, project_id: str, *, max_slots: int = 5,
                    lease_seconds: int = 180, heartbeat_age_seconds: int = 300,
-                   now: float | None = None) -> dict | None:
+                   now: float | None = None, mock_sandbox=None) -> dict | None:
         """Reserve one eligible sealed task and an idle mock worker atomically.
 
         The return value contains a claim_token ONLY for trusted controller code.
         Never expose that token via generic CLI/status commands.
         """
+        if mock_sandbox is not None:
+            from .mock_sandbox import MockSandbox
+            if type(mock_sandbox) is not MockSandbox or mock_sandbox.store is not self.store:
+                raise TypeError("explicit same-store mock sandbox required")
+            if project_id != "offline-demo" or account_id != "offline-demo":
+                raise ValueError("mock sandbox account/project mismatch")
         if not 1 <= max_slots <= 5 or not 30 <= lease_seconds <= 3600:
             raise ValueError("invalid slot bound or lease duration")
         if heartbeat_age_seconds < 30:
@@ -76,6 +82,10 @@ class Scheduler:
             if not slots:
                 return None
             done = {x["task_id"] for x in tasks if x["state"] == TaskState.FINISHED.value}
+            if mock_sandbox is not None:
+                # Explicit fixed offline DAG only. Never changes production
+                # states, releases locks, or teaches default callers to finalize.
+                done |= mock_sandbox.completed_locked(db, project_id)
             held = [json.loads(r[0]) for r in db.execute(
                 "SELECT write_scopes FROM tasks WHERE state IN (" +
                 ",".join("?" for _ in ACTIVE) + ")", ACTIVE)]

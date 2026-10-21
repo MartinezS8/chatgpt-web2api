@@ -47,7 +47,8 @@ class DispatchOutbox:
         db.execute("INSERT OR IGNORE INTO orchestrator_delivery_events(event_key,task_id,attempt_id,kind,payload,at) VALUES (?,?,?,?,?,?)",
                    (key,task,attempt,kind,_stable_json(body or {}),time.time()))
 
-    def begin(self, task_id: str, claim_token: str, *, worker_id: str | None = None) -> dict:
+    def begin(self, task_id: str, claim_token: str, *, worker_id: str | None = None,
+              _preflight_intents=None) -> dict:
         """Record an offline dispatch intent; never an external send authorization.
 
         Existing local callers without worker_id remain mock-only. A new
@@ -57,6 +58,12 @@ class DispatchOutbox:
         """
         if not claim_token:
             raise ValueError("claim token required")
+        if _preflight_intents is not None:
+            from .upload_intents import UploadIntents
+            if (type(_preflight_intents) is not UploadIntents
+                    or _preflight_intents.store is not self.store
+                    or _preflight_intents.packages is not self.packages):
+                raise TypeError("same-store upload intent authority required")
         package = self.packages.read(task_id, verify_blobs=True)  # fail BEFORE write intent
         now=time.time()
         with self.store._connect() as db:
@@ -92,6 +99,16 @@ class DispatchOutbox:
                 raise ValueError("no current fenced and unexpired claim")
             if worker_id is not None and assignment["claim_version"] != task["claim_version"]:
                 raise ValueError("mock worker assignment claim version mismatch")
+            if _preflight_intents is not None:
+                _preflight_intents.assert_ready_locked(
+                    db, task_id=task_id, worker_id=worker_id, claim_token=claim_token,
+                    package_sha256=package["package_sha256"])
+                preflight = db.execute("""SELECT worker_id,package_sha256,assurance
+                    FROM orchestrator_mock_upload_preflight WHERE task_id=?""", (task_id,)).fetchone()
+                if (preflight is None or preflight["worker_id"] != worker_id
+                        or preflight["package_sha256"] != package["package_sha256"]
+                        or preflight["assurance"] != "offline_mock_only"):
+                    raise ValueError("sealed matching mock upload preflight required")
             attempt=secrets.token_hex(20)
             token_hash=hashlib.sha256(claim_token.encode()).hexdigest()
             db.execute("INSERT INTO orchestrator_dispatch_attempts VALUES(?,?,?,?,?,?,?,?,?,?,?)",
@@ -116,6 +133,16 @@ class DispatchOutbox:
         receipt = self.begin(task_id, claim_token, worker_id=worker_id)
         return {**receipt, "assurance": "offline_mock_only",
                 "remote_send_permitted": False}
+
+    def begin_preflighted_mock(self, *, task_id: str, worker_id: str, claim_token: str) -> dict:
+        """Offline intent with current upload readiness checked in the same transaction."""
+        from .upload_intents import UploadIntents
+        if not isinstance(worker_id, str) or not worker_id:
+            raise ValueError("nonempty worker_id required")
+        intents = UploadIntents(self.store, self.packages)
+        receipt = self.begin(task_id, claim_token, worker_id=worker_id,
+                             _preflight_intents=intents)
+        return {**receipt, "assurance": "offline_mock_only", "remote_send_permitted": False}
 
     def get(self, attempt_id: str) -> dict | None:
         with self.store._connect() as db:

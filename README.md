@@ -35,6 +35,12 @@ Same-user hostile filesystem swaps (Model 2) remain **FAIL**; effective
 second-user access denial is **NOT TESTED**. CI is developer diagnostic
 evidence, not a production or provider authorization.
 
+The [installed Windows offline MVP](docs/WINDOWS_OFFLINE_MVP.md) provides a
+fixed five-task DAG using five separate mock identities. From the installed
+wheel environment, use `python -m chatgpt_web2api.orchestrator demo --help`.
+The `init`, `run`, `status` and `doctor` actions need no manual SQL. Synthetic
+completion keeps production task locks held and never enables the real finalizer.
+
 You have a **ChatGPT Plus subscription** but want to use it programmatically:
 
 - **Build AI agents** that chat with ChatGPT via MCP (Model Context Protocol)
