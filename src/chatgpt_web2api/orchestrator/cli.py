@@ -19,6 +19,7 @@ from .private_workspace import load_private_workspace
 from .resource_registry import ResourceIdentity, ResourceRegistry
 from .stage_maintenance import cleanup_managed_stages
 from .storage_hardening import create_private_windows_workspace, snapshot_sqlite_same_directory
+from .storage_policy import PrivateStoragePolicy
 from .store import Store, TaskSpec
 from .task_packages import TaskPackages
 from .worker_commands import (
@@ -152,12 +153,15 @@ def execute(args: argparse.Namespace) -> dict:
     if args.command == "capabilities":
         return _capabilities()
     private = None
+    policy = None
     if getattr(args, "private_workspace", None) is not None:
         if args.db:
             raise ValueError("--private-workspace cannot be combined with --db or CHATGPT_ORCHESTRATOR_DB")
         if args.command == "init-private-workspace":
             raise ValueError("use --label alone when provisioning a new private workspace")
         private = load_private_workspace(args.private_workspace)
+        policy = PrivateStoragePolicy(args.private_workspace, private)
+        policy.check()
     if args.command == "init-private-workspace":
         workspace = create_private_windows_workspace(args.label)
         # Windows Python 3.12.4+ mkdir(mode=0o700) adds explicit Owner
@@ -167,6 +171,7 @@ def execute(args: argparse.Namespace) -> dict:
         workspace.blobs.mkdir(mode=0o777)
         store = Store(workspace.database)
         TaskPackages(store, workspace.blobs)
+        load_private_workspace(args.label)
         return {"workspace": str(workspace.root),
                 "database": str(workspace.database),
                 "blobs": str(workspace.blobs),
@@ -180,29 +185,32 @@ def execute(args: argparse.Namespace) -> dict:
         root = private.require_staging_root(args.root) if private else args.root
         result = cleanup_managed_stages(
             root, min_age_seconds=args.older_than_hours * 3600,
-            dry_run=not args.delete_managed_v2
+            dry_run=not args.delete_managed_v2, storage_policy=policy
         )
         return {**result, "remote_actions_permitted": False}
     if private is None and not args.db:
         raise ValueError("--db, CHATGPT_ORCHESTRATOR_DB or --private-workspace must be set")
     if args.command == "backup-local-db":
-        location = snapshot_sqlite_same_directory(private.database if private else args.db, args.filename)
+        location = snapshot_sqlite_same_directory(private.database if private else args.db, args.filename,
+                                                  storage_policy=policy)
         return {"backup": str(location), "remote_actions_permitted": False}
     db_path = private.database if private else Path(args.db).expanduser().resolve()
     if private:
         if args.command in {"create-task", "seal-task"}:
             private.require_path(args.prompt_file)
+            policy.source(args.prompt_file)
         if args.command == "seal-task":
             for attachment in args.attachment:
-                private.require_path(attachment)
+                policy.source(attachment)
             if args.allowed_root is not None:
-                private.require_path(args.allowed_root, directory=True)
+                policy.source(args.allowed_root, directory=True)
             elif args.attachment:
                 args.allowed_root = str(private.root)
         if args.command == "worker-claim":
             private.require_blob_root(args.blob_root)
+            policy.blobs(args.blob_root)
     if args.command in OBS_COMMANDS:
-        return execute_observer_command(args, db_path)
+        return execute_observer_command(args, db_path, storage_policy=policy)
     if args.command in WORKER_READ_COMMANDS and not db_path.is_file():
         raise FileNotFoundError(f"database does not exist: {db_path}")
     if args.command in WORKER_COMMANDS - WORKER_READ_COMMANDS:
@@ -212,7 +220,7 @@ def execute(args: argparse.Namespace) -> dict:
         raise FileNotFoundError(f"database does not exist: {db_path}")
     if args.command in {"create-task", "claim", "recover", "register-resource", "seal-task", "ack-delivery-event", "reconcile-dispatch"}:
         db_path.parent.mkdir(parents=True, exist_ok=True)
-    store = Store(db_path)
+    store = Store(db_path, storage_policy=policy)
     if args.command in WORKER_COMMANDS:
         return execute_worker_command(args, store)
     if args.command in {"seal-task", "task-package", "delivery-events", "ack-delivery-event", "reconcile-dispatch"}:

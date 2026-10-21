@@ -10,11 +10,17 @@ import secrets
 import time
 
 from .store import ACTIVE, Store, TaskState, _overlaps
+from .task_packages import TaskPackages
 from .worker_registry import WorkerRegistry
 
 
 class Scheduler:
     def __init__(self, store: Store, registry: WorkerRegistry, packages):
+        if (store.storage_policy is not registry.store.storage_policy
+                or store.storage_policy is not getattr(packages, "storage_policy", None)):
+            raise ValueError("scheduler storage policies must match")
+        if store.storage_policy is not None and type(packages) is not TaskPackages:
+            raise TypeError("protected scheduler requires policy-bound TaskPackages")
         if store.path != registry.store.path or store.path != packages.store.path:
             raise ValueError("scheduler authority, registry and packages must share one DB")
         self.store, self.registry, self.packages = store, registry, packages

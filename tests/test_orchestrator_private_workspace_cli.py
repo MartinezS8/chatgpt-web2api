@@ -29,6 +29,7 @@ def private(tmp_path, monkeypatch):
         return ctx
 
     monkeypatch.setattr(cli, "load_private_workspace", trusted_loader)
+    monkeypatch.setattr("chatgpt_web2api.orchestrator.storage_policy.load_private_workspace", trusted_loader)
     return ctx
 
 
@@ -69,6 +70,16 @@ def test_relative_source_refused_before_db_open(private, monkeypatch):
     with pytest.raises(ValueError, match="absolute"):
         _run("create-task", "--id", "t", "--project", "p", "--role",
              "implement", "--prompt-file", "prompt.txt")
+    assert not private.database.exists()
+
+
+def test_interior_dotdot_prompt_refused_before_db_open(private):
+    prompt = private.root / "prompt.txt"
+    prompt.write_text("synthetic", encoding="utf-8")
+    supplied = private.blobs / ".." / "prompt.txt"
+    with pytest.raises(ValueError, match="traversal"):
+        _run("create-task", "--id", "t", "--project", "p", "--role",
+             "implement", "--prompt-file", str(supplied))
     assert not private.database.exists()
 
 
@@ -203,9 +214,9 @@ def test_native_existing_workspace_loader_roundtrip():
     created = create_private_windows_workspace(label)
     try:
         loaded = load_private_workspace(label)
-        assert loaded.root == created.root
-        assert loaded.database == created.database
-        assert loaded.blobs == created.blobs
+        assert loaded.root == created.root.resolve(strict=True)
+        assert loaded.database == loaded.root / created.database.name
+        assert loaded.blobs == loaded.root / created.blobs.name
         loaded.blobs.mkdir()
         Store(loaded.database)
         # The existing DB and child blob directory must remain acceptable,

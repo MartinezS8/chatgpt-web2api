@@ -124,4 +124,16 @@ def load_private_workspace(label: str) -> PrivateStorageContext:
                 else stat.S_ISREG(info.st_mode)):
             raise ValueError("private workspace child has wrong type")
         _check_child_acl(path, sid)
+    # Sidecars, staging locks, snapshots and source files share this boundary.
+    # No arbitrary nested trees are supported in protected storage.
+    for directory in (canonical, blobs):
+        if not directory.exists():
+            continue
+        for child in directory.iterdir():
+            if child == blobs:
+                continue
+            reject_reparse_path(child, error_message="private child traverses reparse point")
+            if not stat.S_ISREG(child.lstat().st_mode):
+                raise ValueError("private workspace contains unsupported child directory/type")
+            _check_child_acl(child, sid)
     return PrivateStorageContext(canonical, database, blobs)

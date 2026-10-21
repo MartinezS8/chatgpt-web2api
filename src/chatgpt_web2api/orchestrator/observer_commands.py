@@ -25,11 +25,11 @@ def configure_observer_commands(commands):
             p.add_argument("--limit",type=int,default=100)
 
 
-def execute_observer_command(args, database):
+def execute_observer_command(args, database, *, storage_policy=None):
     if args.command=="observe-capabilities":
         return {"mode":"read-only-observer", "live_transport":False,
                 "commands":sorted(OBS_COMMANDS)}
-    obs=Observer(database)
+    obs=Observer(database, storage_policy=storage_policy)
     if args.command=="observe-status":
         return obs.status(args.project)
     if args.command=="observe-workers":

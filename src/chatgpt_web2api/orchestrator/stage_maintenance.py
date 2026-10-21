@@ -63,12 +63,15 @@ def _safe_directory(root: str | Path) -> Path:
 
 
 @contextmanager
-def stage_guard(directory: str | Path):
+def stage_guard(directory: str | Path, *, storage_policy=None):
     """Hold an OS-level cross-process lock throughout staging/publishing.
 
     The lock is automatically released when a writer process exits hard.
     This protocol only protects cooperating V2 writers in a controlled root.
     """
+    if storage_policy is not None:
+        from .storage_policy import checked_policy
+        checked_policy(storage_policy).staging(directory)
     directory = _safe_directory(directory)
     # Protect threads in the same process as well as separate processes.
     with _local_stage_lock(directory):
@@ -97,6 +100,8 @@ def stage_guard(directory: str | Path):
 
                 fcntl.flock(fd, fcntl.LOCK_EX)
             try:
+                if storage_policy is not None:
+                    storage_policy.staging(directory)
                 yield directory
             finally:
                 if os.name == "nt":
@@ -154,13 +159,17 @@ def inspect_stages(directory: str | Path, *, min_age_seconds: float = 3600,
 
 
 def cleanup_managed_stages(directory: str | Path, *, min_age_seconds: float = 3600,
-                           dry_run: bool = True, now: float | None = None) -> dict:
+                           dry_run: bool = True, now: float | None = None,
+                           storage_policy=None) -> dict:
     """Remove only managed V2 crash leftovers while no cooperating writer runs.
 
     Existing pre-V2 files are always preserved. Callers must explicitly opt
     into deletion; the default is inspection only. A malicious non-cooperating
     process with write access to the root is out of scope: use private ACLs.
     """
+    if storage_policy is not None:
+        from .storage_policy import checked_policy
+        checked_policy(storage_policy).staging(directory)
     if not isinstance(dry_run, bool):
         raise ValueError("dry_run must be boolean")
     now = _validate_times(min_age_seconds, now)
@@ -171,7 +180,7 @@ def cleanup_managed_stages(directory: str | Path, *, min_age_seconds: float = 36
                 "requires_cooperative_writers": True,
                 "inventory": inspect_stages(directory, min_age_seconds=min_age_seconds,
                                             now=now)}
-    with stage_guard(directory) as root:
+    with stage_guard(directory, storage_policy=storage_policy) as root:
         examined = inspect_stages(root, min_age_seconds=min_age_seconds, now=now)
         removed = []
         for item in examined:
@@ -192,6 +201,8 @@ def cleanup_managed_stages(directory: str | Path, *, min_age_seconds: float = 36
             ):
                 continue
             try:
+                if storage_policy is not None:
+                    storage_policy.staging(root)
                 path.unlink()
             except FileNotFoundError:
                 continue

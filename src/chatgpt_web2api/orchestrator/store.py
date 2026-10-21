@@ -115,20 +115,39 @@ def _overlaps(a: str, b: str) -> bool:
 
 
 class Store:
-    def __init__(self, database: str | Path):
+    def __init__(self, database: str | Path, *, storage_policy=None):
+        self._storage_policy = storage_policy
+        if storage_policy is not None:
+            from .storage_policy import checked_policy
+            checked_policy(storage_policy).database(database)
         self.path = str(database)
         self._initialize()
 
+    @property
+    def storage_policy(self):
+        return self._storage_policy
+
+    @property
+    def storage_mode(self):
+        return "protected-private" if self.storage_policy is not None else "legacy"
+
     @contextmanager
     def _connect(self, *, set_wal: bool = True):
+        if self.storage_policy is not None:
+            from .storage_policy import checked_policy
+            checked_policy(self.storage_policy).database(self.path)
         db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         db.row_factory = sqlite3.Row
         try:
+            if self.storage_policy is not None:
+                db.execute("PRAGMA temp_store=MEMORY")
             db.execute("PRAGMA foreign_keys=ON")
             db.execute("PRAGMA busy_timeout=10000")
             if set_wal:
                 _enable_wal(db)
             yield db
+            if self.storage_policy is not None:
+                self.storage_policy.database(self.path)
             if db.in_transaction:
                 db.commit()
         except Exception:
