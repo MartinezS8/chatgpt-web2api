@@ -36,7 +36,7 @@ only inside the harness's patched SQLite boundary, never in production code.
 Each attacker is a separate process under the same user. SHA-256 values record
 external marker and selected protected-file content before/after the hook.
 Only an observed sharing violation (WinError 32), unchanged markers and no
-operation error count as BLOCKED. Other failures are NOT_TESTED. Observed writes
+operation error count as BLOCKED. Other failures are NOT_TESTED. Observed writes or path changes
 remain REPRODUCED_UNSAFE even if the operation subsequently raises.
 
 The default exit is **1** unless every required surface is BLOCKED. Missing,
@@ -52,14 +52,14 @@ diagnostic success granted confinement.
 | --- | --- |
 | Main / WAL / SHM / migration journal, before SQLite open | BLOCKED; sharing violation and unchanged synthetic markers |
 | Main file content write before SQLite open | REPRODUCED_UNSAFE; file content changed, then SQLite raised DatabaseError |
-| Genuine hot-journal recovery, before SQLite open | NOT_TESTED (inconclusive safety); journal replacement succeeded, later ValueError, independent recovery inspection failed |
+| Genuine hot-journal recovery, before SQLite open | REPRODUCED_UNSAFE for journal identity replacement; later ValueError; rollback/data consequence remains inconclusive |
 | Ancestor, root, attachment source, stage lock, blob publish, backup publish | NOT_TESTED; hooks still required |
 | Restricted second user | NOT_TESTED; no authorized token |
 
 Hot-recovery setup forces cache spill in a child that exits before commit and
 requires the genuine hot-journal signature. A substituted invalid journal and
-postflight failure are not labelled protection. The harness records this
-inconclusive outcome explicitly; it does not prove external corruption or
+postflight failure are not labelled protection. The harness records the unsafe
+path change separately from the inconclusive recovery outcome; it does not prove external corruption or
 successful rollback for that attack.
 
 ## Remaining ordered work

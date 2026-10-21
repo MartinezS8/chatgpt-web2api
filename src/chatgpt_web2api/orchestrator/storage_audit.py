@@ -26,12 +26,14 @@ def security_gate(rows):
     return (
         len(rows) == len(SURFACES)
         and {row["surface"] for row in rows} == set(SURFACES)
-        and all(row["status"] == "BLOCKED" for row in rows)
+        and all(row["status"] == "BLOCKED" and not row.get("cleanup_error")
+                and not row.get("post_observation_error") for row in rows)
     )
 
 
-def classify(*, reached, winerror, marker_changed, protected_changed, error=None):
-    if marker_changed or protected_changed:
+def classify(*, reached, winerror, marker_changed, protected_changed, path_changed=False,
+             error=None):
+    if marker_changed or protected_changed or path_changed:
         return "REPRODUCED_UNSAFE"
     if reached and winerror == 32 and error is None:
         return "BLOCKED"
@@ -48,6 +50,7 @@ def _probe(surface):
     from .store import Store
 
     workspace = create_private_windows_workspace("audit-" + uuid.uuid4().hex)
+    result = None
     try:
         workspace.blobs.mkdir()
         policy = PrivateStoragePolicy.open(workspace.root.name)
@@ -145,6 +148,7 @@ except OSError as error:
                 winerror=(None if observation.get("unlinked")
                           else observation.get("winerror")),
                 marker_changed=before != after,
+                path_changed=observation.get("unlinked", False),
                 protected_changed=(rollback_lost or (surface == "content_write" and
                                    observation.get("protected_before")
                                    != observation.get("protected_after"))),
@@ -152,12 +156,24 @@ except OSError as error:
             )
             hook = ("before_sqlite_journal_recovery" if surface == "hot_recovery_journal"
                     else "before_sqlite_open")
-            return dict(surface=surface, status=status, hook=hook,
+            result = dict(surface=surface, status=status, hook=hook,
                         outside_before=before, outside_after=after,
                         operation_error=error, **observation)
+            return result
+    except Exception as exc:
+        if result is None:
+            raise
+        result["post_observation_error"] = type(exc).__name__
+        return result
     finally:
         # Only the freshly provisioned UUID workspace is removed.
-        shutil.rmtree(workspace.root)
+        try:
+            shutil.rmtree(workspace.root)
+        except OSError as exc:
+            if result is not None:
+                result["cleanup_error"] = type(exc).__name__
+                result["retained_synthetic_workspace"] = str(workspace.root)
+            # Preserve an original probe error, or the already computed row.
 
 
 def audit():

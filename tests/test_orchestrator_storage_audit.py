@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import pytest
 
@@ -12,6 +13,8 @@ def test_gate_rejects_incomplete_duplicate_and_unknown_coverage():
     assert not security_gate(rows[:-1])
     assert not security_gate(rows + [rows[0]])
     assert not security_gate(rows[:-1] + [dict(surface="unknown", status="BLOCKED")])
+    rows[0]["cleanup_error"] = "PermissionError"
+    assert not security_gate(rows)
 
 
 @pytest.mark.parametrize("status", ["NOT_TESTED", "REPRODUCED_UNSAFE", "PASS"])
@@ -26,6 +29,9 @@ def test_postflight_exception_cannot_hide_a_write():
                     protected_changed=False, error="ValueError") == "REPRODUCED_UNSAFE"
     assert classify(reached=True, winerror=None, marker_changed=False,
                     protected_changed=True, error="DatabaseError") == "REPRODUCED_UNSAFE"
+    assert classify(reached=True, winerror=None, marker_changed=False,
+                    protected_changed=False, path_changed=True,
+                    error="ValueError") == "REPRODUCED_UNSAFE"
 
 
 def test_other_errors_and_unreached_hooks_are_not_protection():
@@ -50,3 +56,26 @@ def test_native_probe_reports_content_mutation_despite_sqlite_error():
     assert row["operation_error"] == "DatabaseError"
     assert row["protected_before"] != row["protected_after"]
     assert row["outside_before"] == row["outside_after"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native Windows disposable probe")
+def test_cleanup_failure_preserves_unsafe_evidence(monkeypatch):
+    original = storage_audit.shutil.rmtree
+    retained = []
+
+    def fail_workspace_cleanup(path, *args, **kwargs):
+        if Path(path).name.startswith("audit-"):
+            retained.append(path)
+            raise PermissionError("synthetic cleanup failure")
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(storage_audit.shutil, "rmtree", fail_workspace_cleanup)
+    try:
+        row = storage_audit._probe("content_write")
+        assert row["status"] == "REPRODUCED_UNSAFE"
+        assert row["cleanup_error"] == "PermissionError"
+        assert row["protected_before"] != row["protected_after"]
+        assert retained
+    finally:
+        for path in retained:
+            original(path)
