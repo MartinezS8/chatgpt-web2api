@@ -29,6 +29,30 @@ Venvs, build artifacts and logs are outside the worktree.
 Runner Windows version and exact test/build receipts will be recorded after
 the new SHA is tested; Windows-latest is not a Windows 11 laptop attestation.
 
+Observed baseline `def0c67e55f46c50af6ad1e1aabf621ab482dd2f`: local strict
+**1239 passed, 3 skipped, 20 subtests**, compileall/Ruff exit 0 and clean exact-SHA
+pre/postflight (`w2a-v42-strict.json`, external operator evidence). Build and
+fresh wheel imports, all three console helps, orchestrator help/capabilities
+passed. Gitleaks 8.21.2 passed on that SHA; an incorrect pinned digest was
+rejected before execution. Setup creation/rerun and wrong-interpreter/in-repo
+negative probes passed. Dependencies: pytest 9.1.1, Ruff 0.17.1, MCP 1.30.0,
+build 1.6.1; isolated build resolved hatchling 1.32.4.
+
+CI 39685090470 on this baseline **failed**: 35 native owner checks rejected
+Administrators-owned children (1205 passed, 2 skipped, 20 subtests), secret scan
+passed, build skipped. Follow-up diagnostic run 39686249672 was cancelled when
+superseded. On its same Windows Server 2025 / image 20261018.275.1 runner,
+PowerShell TokenOwner differed from TokenUser: new child owners were
+Administrators; Git Bash created user-owned children. Native source was
+unchanged. Both workflows therefore run strict native tests in Git Bash using
+Windows CPython 3.12, with an explicit disposable user-owner preflight. Native
+owner/DACL checks remain unchanged. The laptop setup now rejects a default
+owner differing from the current user before creating a venv. This is an
+environment constraint, not support for elevated group-owned protected storage.
+Microsoft documents the default owner rule in
+[Owner of a New Object](https://learn.microsoft.com/en-us/windows/win32/secauthz/owner-of-a-new-object).
+No token adjustment, new identity, account, elevation or system ACL change is used.
+
 Luna Max handles disjoint setup/docs and workflow/scanner files. Main agent
 owns package configuration, regression contracts, integration and review.
 No runtime storage security mechanism or fixture reexport is removed.

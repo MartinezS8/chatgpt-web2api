@@ -52,7 +52,7 @@ def test_windows312_runs_full_exact_head_gate_without_unsupported_matrix():
     # Explicit diagnostics can be placed between the strict flag and SHA;
     # only exact-SHA, full-suite and strict requirements are authoritative.
     assert "verify_orchestrator.py --full --strict " in content
-    assert '--expected-sha $env:REVIEWED_HEAD_SHA' in content
+    assert '--expected-sha "$REVIEWED_HEAD_SHA"' in content
     assert "W2A_E2E_RUN: '0'" in content
     assert "needs: [offline-suite, secret-scan]" in content
 

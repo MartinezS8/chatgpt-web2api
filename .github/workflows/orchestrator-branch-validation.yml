@@ -46,21 +46,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Diagnose newly created object owners (Git Bash)
         shell: bash
-        run: python scripts/diagnose_windows_owner.py
+        run: python scripts/diagnose_windows_owner.py --require-user-owner
       - name: Focused native private-storage preflight
-        shell: pwsh
+        # Git Bash launches children with the user as default object owner;
+        # hosted pwsh may use Administrators. Keep exact owner checks intact.
+        shell: bash
         run: |
           python -m pytest -q -p no:cacheprovider tests/test_orchestrator_windows_database_pin.py::test_protected_store_pins_before_sqlite_open
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Full non-E2E verification against pushed Git SHA
-        shell: pwsh
+        shell: bash
         env:
           REVIEWED_HEAD_SHA: ${{ github.sha }}
           W2A_E2E_RUN: '0'
         run: |
-          if ($env:REVIEWED_HEAD_SHA -notmatch '^[0-9a-f]{40}$') { throw 'GitHub did not provide an exact commit SHA.' }
-          python scripts/verify_orchestrator.py --full --strict --diagnostics --expected-sha $env:REVIEWED_HEAD_SHA --timeout 1200
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/verify_orchestrator.py --full --strict --diagnostics --expected-sha "$REVIEWED_HEAD_SHA" --timeout 1200
 
   secret-scan:
     name: full-history Gitleaks scan / Windows

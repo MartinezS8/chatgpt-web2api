@@ -119,6 +119,10 @@ try {
 if ($osProductType -ne 1) {
     throw 'This setup supports Windows 11 workstation editions only; Windows Server is unsupported.'
 }
+$currentIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+if ($currentIdentity.Owner.Value -ne $currentIdentity.User.Value) {
+    throw 'Use a non-elevated user shell: default file ownership must match the current user.'
+}
 
 if ($PythonPath -notmatch '^[A-Za-z]:\\') {
     throw '-PythonPath must be an explicit absolute local Windows path to python.exe.'

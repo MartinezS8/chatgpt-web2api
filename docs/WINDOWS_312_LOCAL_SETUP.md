@@ -4,6 +4,10 @@ This document covers the supported local developer setup for the offline
 orchestrator stack. The setup script requires a Windows 11 x64 workstation and
 64-bit CPython 3.12.x. Windows Server, Windows 10, ARM64, other Python versions,
 Linux and macOS are outside this setup contract.
+Use a normal non-elevated user shell. The setup refuses a default object owner
+different from the current user. Hosted Windows PowerShell was observed creating
+Administrators-owned children; CI therefore verifies user ownership in Git Bash
+before running the native Windows Python tests. No owner allowlist is relaxed.
 
 The setup is developer tooling only. It creates a virtual environment outside
 the checkout and installs the editable development package plus `build`. It
@@ -57,7 +61,7 @@ $runStamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssfffZ', [Globalization.Cu
 $evidenceRoot = Join-Path $env:LOCALAPPDATA "chatgpt-web2api\evidence\$expectedSha\$runStamp"
 New-Item -ItemType Directory -Path $evidenceRoot -ErrorAction Stop | Out-Null
 $gateJson = Join-Path $evidenceRoot 'strict-verifier.json'
-& $venvPython .\scripts\verify_orchestrator.py --full --strict --expected-sha $expectedSha |
+& $venvPython .\scripts\verify_orchestrator.py --full --strict --expected-sha $expectedSha --timeout 1200 |
     Tee-Object -FilePath $gateJson
 $verifyExitCode = $LASTEXITCODE
 if ($verifyExitCode -ne 0) { throw "Strict verification failed with exit code $verifyExitCode." }
@@ -86,7 +90,7 @@ This checks packaging and entry-point imports; it does not run provider flows.
 ```powershell
 $wheelDir = Join-Path $evidenceRoot 'wheel'
 New-Item -ItemType Directory -Path $wheelDir -ErrorAction Stop | Out-Null
-& $venvPython -m build --wheel --outdir $wheelDir
+& $venvPython -m build --sdist --wheel --outdir $wheelDir
 if ($LASTEXITCODE -ne 0) { throw 'Wheel build failed.' }
 
 $wheels = @(Get-ChildItem -LiteralPath $wheelDir -Filter 'chatgpt_web2api-*.whl' -File)

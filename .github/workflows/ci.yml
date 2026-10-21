@@ -31,15 +31,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m pip install -e '.[dev]'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Require user-owned private children in test process
+        shell: bash
+        run: python scripts/diagnose_windows_owner.py --require-user-owner
       - name: Full non-E2E verification against exact Git SHA
-        shell: pwsh
+        # Preserve user-owned object creation on hosted elevated runner tokens.
+        # This remains Windows Python; no POSIX platform job is involved.
+        shell: bash
         env:
           REVIEWED_HEAD_SHA: ${{ github.sha }}
           W2A_E2E_RUN: '0'
         run: |
-          if ($env:REVIEWED_HEAD_SHA -notmatch '^[0-9a-f]{40}$') { throw 'GitHub did not provide an exact commit SHA.' }
-          python scripts/verify_orchestrator.py --full --strict --diagnostics --expected-sha $env:REVIEWED_HEAD_SHA --timeout 1200
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/verify_orchestrator.py --full --strict --diagnostics --expected-sha "$REVIEWED_HEAD_SHA" --timeout 1200
 
   secret-scan:
     name: full-history Gitleaks scan / Windows
