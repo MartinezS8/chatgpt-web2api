@@ -288,3 +288,74 @@ def test_native_inventory_restarts_only_for_disappearing_sidecars(monkeypatch, f
             assert len(attempts) == 1, "ACL denial must not be retried or ignored"
     finally:
         shutil.rmtree(workspace.root)
+
+
+@pytest.mark.parametrize("operation", ["store", "observer", "backup"])
+def test_policy_pins_wal_and_shm_before_sqlite_opens(monkeypatch, operation):
+    workspace = create_private_windows_workspace("pin-sidecars-" + uuid.uuid4().hex[:10])
+    try:
+        workspace.blobs.mkdir()
+        policy = PrivateStoragePolicy.open(workspace.root.name)
+        store = Store(policy.context.database, storage_policy=policy)
+        store.create(TaskSpec("sidecar", "p", "implement", "synthetic"))
+        observer = Observer(store.path, storage_policy=policy)
+        original = sqlite3.connect
+        checked = []
+
+        def guarded_connect(*args, **kwargs):
+            path = str(args[0])
+            if path in (store.path, policy.context.database.as_uri() + "?mode=ro"):
+                for suffix in ("-wal", "-shm"):
+                    assert _attempt_delete(Path(store.path + suffix)), f"{suffix} must be pinned before SQLite open"
+                checked.append(True)
+            return original(*args, **kwargs)
+
+        monkeypatch.setattr("sqlite3.connect", guarded_connect)
+        if operation == "store":
+            assert store.get("sidecar")["task_id"] == "sidecar"
+        elif operation == "observer":
+            assert observer.status("p")["tasks"] == 1
+        else:
+            assert snapshot_sqlite_same_directory(store.path, "backup.sqlite3", storage_policy=policy).is_file()
+        assert checked
+        # Pins must release after SQLite closes, including its sidecar handles.
+        for suffix in ("-wal", "-shm"):
+            Path(store.path + suffix).unlink()
+    finally:
+        shutil.rmtree(workspace.root)
+
+
+@pytest.mark.parametrize("commit", [False, True])
+def test_protected_wal_pins_recover_after_owned_child_crash(commit):
+    workspace = create_private_windows_workspace("pin-crash-" + uuid.uuid4().hex[:10])
+    try:
+        workspace.blobs.mkdir()
+        policy = PrivateStoragePolicy.open(workspace.root.name)
+        store = Store(policy.context.database, storage_policy=policy)
+        with store._connect() as database:
+            database.execute("CREATE TABLE synthetic_crash(value TEXT)")
+        program = """
+import os,sys
+from chatgpt_web2api.orchestrator.storage_policy import PrivateStoragePolicy
+from chatgpt_web2api.orchestrator.store import Store
+policy = PrivateStoragePolicy.open(sys.argv[1])
+store = Store(policy.context.database, storage_policy=policy)
+with store._connect() as database:
+    database.execute('BEGIN IMMEDIATE')
+    database.execute("INSERT INTO synthetic_crash VALUES ('synthetic')")
+    if sys.argv[2] == 'commit':
+        database.execute('COMMIT')
+    os._exit(23)
+"""
+        child = subprocess.run(
+            [sys.executable, "-c", program, workspace.root.name, "commit" if commit else "rollback"],
+            capture_output=True, text=True, timeout=45,
+        )
+        assert child.returncode == 23, child.stderr
+        reopened = Store(policy.context.database, storage_policy=policy)
+        with reopened._connect() as database:
+            assert database.execute("SELECT count(*) FROM synthetic_crash").fetchone()[0] == int(commit)
+            assert database.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            assert database.execute("PRAGMA foreign_key_check").fetchone() is None
+    finally:
+        shutil.rmtree(workspace.root)

@@ -77,6 +77,38 @@ cover successful complete retry, bounded failure, ACL denial and missing source.
 | Effective second-user read/write/delete denial | NOT TESTED: no authorized restricted token |
 | Real workers / production | NOT TESTED |
 
+## Selective WAL/SHM follow-up
+
+A second native prototype omitted the rollback-journal pin. DELETE and PERSIST
+commits, PERSIST-to-WAL promotion, and WAL commit/reopen all succeeded. Protected
+policy sessions therefore now pin the main DB's WAL and SHM names as well as
+the main file and parent, before SQLite opens, through SQLite close. Missing
+sidecars are created as empty regular files under the validated root and receive
+the same held-handle child ACL/type/link checks. Existing malformed/reparse or
+multiply linked sidecars fail closed. Raw `pin_database` defaults to main-only;
+the protected policy always explicitly enables WAL/SHM pinning.
+
+Observer SQL stays read-only and cannot create a missing main DB, but its private
+session may create SQLite sidecars. A read-only SQL observer is not a filesystem
+nonmutation guarantee. No user tables, callbacks, reviews or dispatches are
+mutated by observer methods.
+
+The controlled postflight WAL swap now fails at unlink with PermissionError;
+the external synthetic file stays unchanged. Store/Observer/backup regression
+tests check WAL and SHM delete denial before SQLite open and release after close.
+Owned-child crash tests verify rollback before commit and durability after
+commit, with integrity/FK checks after reopening.
+
+This introduces a measured Windows cost: in the native probe SQLite close took
+about 2.9 seconds with WAL/SHM pins, compared with approximately zero without
+them, because its Win32 VFS retries sidecar deletion. No unsafe early pin release
+or unsupported access to CPython's SQLite connection memory is used to hide
+that cost. Throughput/latency remain an explicit limitation to evaluate.
+
+The unpinned rollback journal, hot-journal recovery, staging/publish names,
+ancestor races and hostile content writes still prevent a general Model 2
+guarantee. This targeted fix does not relabel Windows TOCTOU as PASS.
+
 ## References
 
 - [CreateFileW access and sharing](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew)

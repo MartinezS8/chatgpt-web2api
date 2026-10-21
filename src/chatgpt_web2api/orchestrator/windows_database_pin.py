@@ -1,8 +1,8 @@
-"""Keep the main DB and its direct parent open without delete sharing.
+"""Pin main DB/parent, optionally also WAL/SHM, without delete sharing.
 
 This closes one main-file replacement window. It is NOT handle-relative
-SQLite I/O: ancestors, WAL/SHM/journals, and file contents remain separate
-threat surfaces. In-process Python code is trusted.
+SQLite I/O: ancestors, rollback journals, publication and file contents remain
+separate threat surfaces. In-process Python code is trusted.
 """
 from __future__ import annotations
 
@@ -18,7 +18,8 @@ from .windows_acl import (
 
 
 @contextmanager
-def pin_database(database: Path, *, create: bool = False, expected_sid: str | None = None):
+def pin_database(database: Path, *, create: bool = False, expected_sid: str | None = None,
+                 pin_wal_sidecars: bool = False):
     """Pin a regular, singly linked DB (optionally create an empty file).
 
     Acquire pins before the caller repeats its native policy validation and
@@ -57,11 +58,11 @@ def pin_database(database: Path, *, create: bool = False, expected_sid: str | No
 
     handles = []
 
-    def acquire(path, *, directory):
+    def acquire(path, *, directory, may_create=False):
         # Actual READ access is essential. A metadata-only handle did not
         # enforce delete denial in the native regression probe.
         handle = kernel.CreateFileW(
-            str(path), 0x80000000, 3, None, 4 if create and not directory else 3,
+            str(path), 0x80000000, 3, None, 4 if may_create else 3,
             0x00200000 | (0x02000000 if directory else 0), None,
         )
         if handle == c.c_void_p(-1).value:
@@ -92,7 +93,13 @@ def pin_database(database: Path, *, create: bool = False, expected_sid: str | No
 
     try:
         acquire(database.parent, directory=True)
-        identity = acquire(database, directory=False)
+        identity = acquire(database, directory=False, may_create=create)
+        if pin_wal_sidecars:
+            # SQLite may create these lazily. Bind both names before its first
+            # open, without pinning the DELETE-mode rollback journal (whose
+            # deletion is part of commit). Keep all pins through SQLite close.
+            for suffix in ("-wal", "-shm"):
+                acquire(Path(str(database) + suffix), directory=False, may_create=True)
         yield identity
     finally:
         # Attempt every close, even if an unexpected native close fails.

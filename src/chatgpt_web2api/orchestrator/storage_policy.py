@@ -24,7 +24,7 @@ def _private_database_pin(path, *, create):
         capture_output=True, text=True, check=True, timeout=15,
     )
     sid = parse_current_user_sid(result.stdout)
-    return pin_database(path, create=create, expected_sid=sid)
+    return pin_database(path, create=create, expected_sid=sid, pin_wal_sidecars=True)
 
 
 @dataclass(frozen=True)
@@ -60,11 +60,12 @@ class PrivateStoragePolicy:
 
     @contextmanager
     def database_session(self, path, *, create=False):
-        """Recheck binding while Windows pins the main DB and direct parent.
+        """Recheck binding while Windows pins main DB, parent and WAL/SHM.
 
         A native policy cannot open on other platforms. The null context only
         supports portable contract tests that replace the native loader.
-        This is not a hostile-race boundary for SQLite sidecars or ancestors.
+        This does not establish a complete I/O boundary for all journals,
+        ancestors, stage files or publication operations.
         """
         supplied = self.database(path)
         pin = nullcontext()
