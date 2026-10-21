@@ -7,7 +7,7 @@ import re
 import secrets
 import sqlite3
 import time
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 from pathlib import Path
@@ -136,6 +136,14 @@ class Store:
         if self.storage_policy is not None:
             from .storage_policy import checked_policy
             checked_policy(self.storage_policy).database(self.path)
+        pin = (self.storage_policy.database_session(self.path, create=True)
+               if self.storage_policy is not None else nullcontext())
+        with pin:
+            with self._open_connection(set_wal=set_wal) as db:
+                yield db
+
+    @contextmanager
+    def _open_connection(self, *, set_wal: bool):
         db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         db.row_factory = sqlite3.Row
         try:

@@ -13,7 +13,7 @@ import re
 import sqlite3
 import stat
 import subprocess
-from contextlib import closing
+from contextlib import closing, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -201,7 +201,9 @@ def snapshot_sqlite_same_directory(database: str | Path, filename: str, *, stora
         fd, stage = create_managed_stage(parent, "sqlite-snapshot")
         os.close(fd)
         try:
-            with closing(sqlite3.connect(src)) as source:
+            pin = (storage_policy.database_session(src)
+                   if storage_policy is not None else nullcontext())
+            with pin, closing(sqlite3.connect(src)) as source:
                 with closing(sqlite3.connect(stage)) as target:
                     source.backup(target)  # includes committed WAL transactions
                     check = target.execute("PRAGMA integrity_check").fetchone()

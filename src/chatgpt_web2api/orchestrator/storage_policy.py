@@ -5,6 +5,8 @@ Python code executing in this process is trusted, not a sandboxed principal.
 """
 from __future__ import annotations
 
+import os
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,6 +43,23 @@ class PrivateStoragePolicy:
         if not supplied.is_absolute() or ".." in supplied.parts or supplied != current.blobs:
             raise ValueError("protected blobs must match workspace blobs")
         return current.require_blob_root(supplied)
+
+    @contextmanager
+    def database_session(self, path, *, create=False):
+        """Recheck binding while Windows pins the main DB and direct parent.
+
+        A native policy cannot open on other platforms. The null context only
+        supports portable contract tests that replace the native loader.
+        This is not a hostile-race boundary for SQLite sidecars or ancestors.
+        """
+        supplied = self.database(path)
+        pin = nullcontext()
+        if os.name == "nt":
+            from .windows_database_pin import pin_database
+            pin = pin_database(supplied, create=create)
+        with pin:
+            self.database(supplied)
+            yield
 
     def source(self, path, *, directory=False) -> Path:
         if ".." in Path(path).parts:

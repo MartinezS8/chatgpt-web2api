@@ -6,7 +6,7 @@ expose prompt bodies, claim tokens, or authorize remote writes.
 from __future__ import annotations
 
 import sqlite3
-from contextlib import closing
+from contextlib import closing, nullcontext
 from pathlib import Path
 
 
@@ -27,7 +27,9 @@ class Observer:
             self.storage_policy.database(self.path)
         # sqlite3.Connection context manager commits/rolls back but does NOT
         # close the connection. The observer is polled repeatedly; close it.
-        with closing(sqlite3.connect(uri, uri=True, timeout=5.0)) as db:
+        pin = (self.storage_policy.database_session(self.path)
+               if self.storage_policy is not None else nullcontext())
+        with pin, closing(sqlite3.connect(uri, uri=True, timeout=5.0)) as db:
             db.row_factory = sqlite3.Row
             rows = db.execute(query, (*params, limit)).fetchall()
             return [dict(r) for r in rows]

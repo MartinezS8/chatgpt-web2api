@@ -421,6 +421,12 @@ See [PR-34 staging recovery and path-race limitations](ORCHESTRATOR_PR34_STAGE_R
 
 ## Non-negotiable product constraints
 
+Windows main-file pin follow-up: see
+[native lifetime and limitations](ORCHESTRATOR_WINDOWS_DATABASE_PIN.md).
+Protected Store, Observer and backup source connections share a native pin
+session. Main-file/direct-parent delete denial is separate from the still-open
+hostile ancestor/sidecar/publication races and second-user acceptance gates.
+
 Protected storage boundary follow-up: see
 [policy contract](ORCHESTRATOR_PROTECTED_STORAGE_BOUNDARY.md). Explicit native
 policy now propagates to library Store/Packages, mock services, staging/backup

@@ -44,7 +44,9 @@ checks and use. It remains unsupported. Repeated checks and cooperative locks
 do not make path-based sqlite3/open/link/replace/unlink handle-relative.
 Holding a Windows identity handle does not bind Python SQLite's independently
 opened DB/WAL/SHM paths. A comprehensive solution would require a larger native
-I/O/VFS design and adversarial testing. No cosmetic handle wrapper is added.
+I/O/VFS design and adversarial testing. A subsequent scoped main-file lifetime
+pin is documented in `ORCHESTRATOR_WINDOWS_DATABASE_PIN.md`; it does not change
+the unsupported Model 2 status or bind SQLite sidecars to native handles.
 
 Effective denial to a restricted second user remains NOT TESTED without an
 already authorized test token. No account/ACL outside disposable test roots
