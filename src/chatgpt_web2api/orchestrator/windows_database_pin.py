@@ -10,9 +10,15 @@ import os
 from contextlib import contextmanager
 from pathlib import Path
 
+from .windows_acl import (
+    read_windows_handle_descriptor,
+    validate_private_child_descriptor,
+    validate_private_descriptor,
+)
+
 
 @contextmanager
-def pin_database(database: Path, *, create: bool = False):
+def pin_database(database: Path, *, create: bool = False, expected_sid: str | None = None):
     """Pin a regular, singly linked DB (optionally create an empty file).
 
     Acquire pins before the caller repeats its native policy validation and
@@ -76,6 +82,12 @@ def pin_database(database: Path, *, create: bool = False):
         expected = "\\\\?\\" + str(path)
         if os.path.normcase(buffer.value) != os.path.normcase(expected):
             raise ValueError("database pin opened an unexpected final path")
+        if expected_sid is not None:
+            descriptor = read_windows_handle_descriptor(handle)
+            if directory:
+                validate_private_descriptor(descriptor, expected_sid)
+            else:
+                validate_private_child_descriptor(descriptor, expected_sid)
         return info.volume, info.index_high, info.index_low
 
     try:

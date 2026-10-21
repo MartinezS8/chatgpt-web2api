@@ -14,11 +14,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .storage_hardening import parse_current_user_sid, reject_reparse_path
-from .windows_acl import read_windows_descriptor, validate_private_descriptor
+from .windows_acl import (
+    read_windows_descriptor,
+    validate_private_child_descriptor,
+    validate_private_descriptor,
+)
 
 _LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,39}\Z")
-_ALLOWED_SIDS = {"S-1-5-18"}
-_FULL_CONTROL = 0x1F01FF
 _SQLITE_SIDECARS = frozenset({"controller.sqlite3-wal", "controller.sqlite3-shm",
                             "controller.sqlite3-journal"})
 
@@ -82,15 +84,7 @@ def _check_child_acl(path: Path, sid: str) -> None:
     reject_reparse_path(
         path, error_message="private workspace child traverses reparse point"
     )
-    desc = read_windows_descriptor(path)
-    if desc.get("owner_sid") != sid:
-        raise PermissionError("private workspace child has an unexpected owner")
-    aces = desc.get("aces", [])
-    wanted = {sid, *_ALLOWED_SIDS}
-    if (not aces or {a.get("sid") for a in aces} != wanted
-            or any(a.get("type") != 0 or not isinstance(a.get("mask"), int)
-                   or a["mask"] & ~_FULL_CONTROL for a in aces)):
-        raise PermissionError("private workspace child grants unexpected access")
+    validate_private_child_descriptor(read_windows_descriptor(path), sid)
 
 
 def load_private_workspace(label: str) -> PrivateStorageContext:

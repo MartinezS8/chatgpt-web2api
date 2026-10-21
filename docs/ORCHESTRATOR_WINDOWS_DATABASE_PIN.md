@@ -21,6 +21,16 @@ object; `GetFinalPathNameByHandleW` checks its reported path. Only local drive
 paths are supported; UNC/device paths fail before native acquisition. No ACLs
 are changed by pinning.
 
+Protected policy sessions also obtain the current principal via the existing
+shell-free SID parser and inspect each held root/DB handle with GetSecurityInfo.
+The root must satisfy the existing exact protected user/SYSTEM contract; the DB
+must satisfy the existing inherited-child contract. Both path and handle
+readbacks use the same native descriptor parser and validators. A failed
+GetSecurityInfo call has no path-based fallback. The reader borrows its handle
+and frees only the returned security descriptor/SID strings; the pin owns and
+closes the handles after SQLite closes. These are current descriptor checks,
+not effective second-user access proofs or permanent authorization leases.
+
 ## Evidence and limits
 
 The regression reproduced main-file deletion by a separate process between
@@ -44,6 +54,14 @@ A comprehensive native VFS or broker remains a separate design/test gate.
 Do not precreate or permanently lock journals without proving SQLite recovery
 behavior. WAL sidecar lifetime also differs after crashes/read-only clients.
 
+A disposable native prototype pinned main/WAL/SHM/journal files simultaneously.
+DELETE commit and WAL initialization failed with SQLITE_IOERR_DELETE (2570).
+PERSIST commit succeeded but promotion to WAL failed with the same error. All
+reopened databases passed integrity_check after releasing the pins. Therefore
+blanket sidecar pins are not integrated: they would break the existing commit
+and migration/WAL contract. This is evidence against that proposed shortcut,
+not a proof that no maintainable VFS/broker design is possible.
+
 Native five-Store concurrency exposed a disappearing SHM during the existing
 ACL inventory. The loader now restarts the complete native validation at most
 three times, only if an exact main-DB WAL/SHM/journal child disappears during
@@ -65,3 +83,6 @@ cover successful complete retry, bounded failure, ACL denial and missing source.
 - [GetFileInformationByHandle](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfileinformationbyhandle)
 - [GetFinalPathNameByHandleW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getfinalpathnamebyhandlew)
 - [SQLite WAL and read-only sidecar requirements](https://sqlite.org/wal.html)
+- [GetSecurityInfo: descriptor of a held object](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-getsecurityinfo)
+- [NtCreateFile: native user-mode file operations](https://learn.microsoft.com/en-us/windows/win32/api/winternl/nf-winternl-ntcreatefile)
+- [SQLite VFS: OS I/O integration layer](https://sqlite.org/vfs.html)

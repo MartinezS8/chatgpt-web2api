@@ -6,11 +6,25 @@ Python code executing in this process is trusted, not a sandboxed principal.
 from __future__ import annotations
 
 import os
+import subprocess
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 
 from .private_workspace import PrivateStorageContext, load_private_workspace
+
+
+def _private_database_pin(path, *, create):
+    """Acquire native pins with a fresh current-principal owner/DACL check."""
+    from .storage_hardening import parse_current_user_sid
+    from .windows_database_pin import pin_database
+
+    result = subprocess.run(
+        ["whoami.exe", "/user", "/fo", "csv", "/nh"],
+        capture_output=True, text=True, check=True, timeout=15,
+    )
+    sid = parse_current_user_sid(result.stdout)
+    return pin_database(path, create=create, expected_sid=sid)
 
 
 @dataclass(frozen=True)
@@ -55,8 +69,7 @@ class PrivateStoragePolicy:
         supplied = self.database(path)
         pin = nullcontext()
         if os.name == "nt":
-            from .windows_database_pin import pin_database
-            pin = pin_database(supplied, create=create)
+            pin = _private_database_pin(supplied, create=create)
         with pin:
             self.database(supplied)
             yield

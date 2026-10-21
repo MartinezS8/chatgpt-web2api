@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 
 import pytest
 
@@ -34,6 +35,13 @@ def test_protected_mock_workers_claim_unique_slots_and_never_resend_unknown(
 
     monkeypatch.setattr(
         storage_policy_module, "load_private_workspace", fake_native_loader
+    )
+    # This tmp-path integration covers portable worker policy only; native
+    # ACL and database-pin behavior has separate Windows tests.
+    monkeypatch.setattr(
+        storage_policy_module,
+        "_private_database_pin",
+        lambda path, *, create: nullcontext(),
     )
     policy = storage_policy_module.PrivateStoragePolicy.open("portable-test")
 

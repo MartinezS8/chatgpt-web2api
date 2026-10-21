@@ -26,6 +26,28 @@ def read_windows_descriptor(path: str | Path) -> dict:
     This is a point-in-time, path-based observation. Callers must not infer
     handle-relative protection of later open/link/unlink operations from it.
     """
+    return _read_windows_descriptor(path=path)
+
+
+def read_windows_handle_descriptor(handle: int) -> dict:
+    """Read the held object's owner/DACL; never fall back to its name."""
+    if not isinstance(handle, int) or isinstance(handle, bool) or handle <= 0:
+        raise ValueError("invalid Windows security descriptor handle")
+    return _read_windows_descriptor(handle=handle)
+
+
+def validate_private_child_descriptor(descriptor: dict, sid: str) -> None:
+    """Preserve the inherited child contract, distinct from the root DACL."""
+    if descriptor.get("owner_sid") != sid:
+        raise PermissionError("private workspace child has an unexpected owner")
+    aces = descriptor.get("aces", [])
+    if (not aces or {ace.get("sid") for ace in aces} != {sid, "S-1-5-18"}
+            or any(ace.get("type") != 0 or not isinstance(ace.get("mask"), int)
+                   or ace["mask"] & ~_FULL_CONTROL for ace in aces)):
+        raise PermissionError("private workspace child grants unexpected access")
+
+
+def _read_windows_descriptor(*, path=None, handle=None) -> dict:
     if os.name != "nt":
         raise OSError("native DACL inspection requires Windows")
     import ctypes as c
@@ -38,6 +60,8 @@ def read_windows_descriptor(path: str | Path) -> dict:
     adv.GetNamedSecurityInfoW.argtypes = [w.LPWSTR, c.c_int, w.DWORD,
                                          pp, pp, pp, pp, pp]
     adv.GetNamedSecurityInfoW.restype = w.DWORD
+    adv.GetSecurityInfo.argtypes = [w.HANDLE, c.c_int, w.DWORD, pp, pp, pp, pp, pp]
+    adv.GetSecurityInfo.restype = w.DWORD
     adv.ConvertSidToStringSidW.argtypes = [ptr, c.POINTER(w.LPWSTR)]
     adv.ConvertSidToStringSidW.restype = w.BOOL
     adv.GetSecurityDescriptorControl.argtypes = [ptr, c.POINTER(w.WORD),
@@ -53,8 +77,12 @@ def read_windows_descriptor(path: str | Path) -> dict:
                     ("size", w.WORD), ("count", w.WORD), ("reserved2", w.WORD)]
 
     owner, dacl, sd = ptr(), ptr(), ptr()
-    error = adv.GetNamedSecurityInfoW(str(path), 1, 5, c.byref(owner), None,
-                                     c.byref(dacl), None, c.byref(sd))
+    if handle is None:
+        error = adv.GetNamedSecurityInfoW(str(path), 1, 5, c.byref(owner), None,
+                                         c.byref(dacl), None, c.byref(sd))
+    else:
+        error = adv.GetSecurityInfo(handle, 1, 5, c.byref(owner), None,
+                                    c.byref(dacl), None, c.byref(sd))
     if error:
         raise c.WinError(error)
 
