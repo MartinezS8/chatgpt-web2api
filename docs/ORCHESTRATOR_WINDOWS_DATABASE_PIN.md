@@ -44,11 +44,11 @@ tested Windows runtime. Do not replace the actual read handle with a metadata
 handle to avoid permission/sharing errors.
 
 This mitigates one main-file replacement window. Model 2 remains unsupported.
-Ancestor replacement, acquisition races, attribute changes, WAL/SHM/journal
-names, blobs, staging, backup publication and hostile content writes are not
-bound to this handle. A limitation test confirms that an unheld sibling WAL
-filename is still deletable while the main database is pinned. SQLite still
-opens independent path strings; no complete confinement guarantee is claimed.
+The initial main-only pin left WAL/SHM/journal names, blobs, staging, backup
+publication and hostile content writes unbound. A limitation test at that
+baseline confirmed that an unheld sibling WAL filename was deletable while the
+main database was pinned. SQLite still opens independent path strings; no
+complete confinement guarantee is claimed.
 
 A comprehensive native VFS or broker remains a separate design/test gate.
 Do not precreate or permanently lock journals without proving SQLite recovery
@@ -72,7 +72,7 @@ cover successful complete retry, bounded failure, ACL denial and missing source.
 
 | Gate | Status |
 | --- | --- |
-| Windows handle identity | PARTIAL: main-file observation/lifetime only |
+| Windows handle identity | PARTIAL: parent/main/WAL/SHM handles are held and checked; SQLite I/O is still path based |
 | General Windows TOCTOU protection | FAIL: Model 2 remains open |
 | Effective second-user read/write/delete denial | NOT TESTED: no authorized restricted token |
 | Real workers / production | NOT TESTED |
@@ -105,9 +105,17 @@ them, because its Win32 VFS retries sidecar deletion. No unsafe early pin releas
 or unsupported access to CPython's SQLite connection memory is used to hide
 that cost. Throughput/latency remain an explicit limitation to evaluate.
 
-The unpinned rollback journal, hot-journal recovery, staging/publish names,
-ancestor races and hostile content writes still prevent a general Model 2
-guarantee. This targeted fix does not relabel Windows TOCTOU as PASS.
+The unpinned rollback journal is still a live race. A controlled synthetic
+interleaving inserted a `controller.sqlite3-journal` symlink after policy
+pinning and immediately before `sqlite3.connect()` during Store initialization.
+SQLite changed the external synthetic target; the later private-child check then
+raised `ValueError: private child traverses reparse point`. A separate injection
+at the first WAL connection was rejected before changing its target. These are
+deterministic call-boundary probes, not timing-based multi-process race coverage.
+The journal result confirms that postflight detection is too late to prevent a
+write. Hot-journal recovery, staging/publish names, ancestor races and hostile
+content writes also remain outside the handle boundary. Model 2 stays
+unsupported and the general Windows TOCTOU gate remains FAIL.
 
 ## References
 
