@@ -198,15 +198,17 @@ def execute(args: argparse.Namespace) -> dict:
     if private:
         if args.command in {"create-task", "seal-task"}:
             private.require_path(args.prompt_file)
+            policy.source(args.prompt_file)
         if args.command == "seal-task":
             for attachment in args.attachment:
-                private.require_path(attachment)
+                policy.source(attachment)
             if args.allowed_root is not None:
-                private.require_path(args.allowed_root, directory=True)
+                policy.source(args.allowed_root, directory=True)
             elif args.attachment:
                 args.allowed_root = str(private.root)
         if args.command == "worker-claim":
             private.require_blob_root(args.blob_root)
+            policy.blobs(args.blob_root)
     if args.command in OBS_COMMANDS:
         return execute_observer_command(args, db_path, storage_policy=policy)
     if args.command in WORKER_READ_COMMANDS and not db_path.is_file():

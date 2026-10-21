@@ -73,6 +73,16 @@ def test_relative_source_refused_before_db_open(private, monkeypatch):
     assert not private.database.exists()
 
 
+def test_interior_dotdot_prompt_refused_before_db_open(private):
+    prompt = private.root / "prompt.txt"
+    prompt.write_text("synthetic", encoding="utf-8")
+    supplied = private.blobs / ".." / "prompt.txt"
+    with pytest.raises(ValueError, match="traversal"):
+        _run("create-task", "--id", "t", "--project", "p", "--role",
+             "implement", "--prompt-file", str(supplied))
+    assert not private.database.exists()
+
+
 def test_file_symlink_outside_is_rejected(private, tmp_path):
     outside = tmp_path / "secret.txt"
     outside.write_text("secret", encoding="utf-8")
