@@ -27,6 +27,14 @@ def _probe_root(value: str | Path) -> Path:
         raise ValueError("only a disposable w2a-isolation-probe-* workspace is supported")
     if path.is_symlink():
         raise ValueError("probe workspace must not be a symlink")
+    if os.name == "nt":
+        from .storage_hardening import reject_reparse_path
+
+        # A junction somewhere above a synthetically named root must not
+        # redirect destructive probe operations to another directory.
+        reject_reparse_path(
+            path, error_message="synthetic probe root traverses a reparse point",
+        )
     return path
 
 
