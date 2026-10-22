@@ -235,3 +235,61 @@ def test_schema_tampering_rejects_before_account_access(context, monkeypatch):
     with pytest.raises(ValueError, match="checksum"):
         _run(context, allow_one_turn=True)
     assert not context[-1].exists()
+
+
+def test_mismatched_thread_result_receipt_identifies_no_turn_attempt(context, monkeypatch):
+    frames = _success_frames()
+    frames[2]["result"]["thread"].pop("source")
+    proc = _FakeProcess(frames)
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: proc)
+    with pytest.raises(ValueError, match="thread_result"):
+        _run(context, allow_one_turn=True)
+    receipt = json.loads((context[-1] / "quarantine.json").read_text("utf-8"))
+    assert receipt["turn_start_may_have_been_sent"] is False
+    assert receipt["status"] == "pre_turn_failure_no_turn_start_attempted"
+    methods = [json.loads(line)["method"] for line in proc.stdin.getvalue().splitlines()]
+    assert "turn/start" not in methods
+
+
+def test_lost_post_send_ack_marks_uncertain_not_resendable(context, monkeypatch):
+    frames = _success_frames()
+    # Drop the turn/start ACK; process closes after one outbound turn/start.
+    proc = _FakeProcess(frames[:4])
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: proc)
+    with pytest.raises(RuntimeError, match="closed"):
+        _run(context, allow_one_turn=True)
+    receipt = json.loads((context[-1] / "quarantine.json").read_text("utf-8"))
+    assert receipt["turn_start_may_have_been_sent"] is True
+    assert receipt["status"] == "needs_human_unknown_or_unverified_delivery"
+    assert receipt["retry_permitted"] is False
+    methods = [json.loads(line)["method"] for line in proc.stdin.getvalue().splitlines()]
+    assert methods.count("turn/start") == 1
+
+
+def test_turn_started_before_thread_ack_is_protocol_error(context, monkeypatch):
+    frames = _success_frames()
+    frames.insert(2, {
+        "method": "turn/started",
+        "params": {"threadId": "thread-x", "turn": {
+            "id": "turn-x", "status": "inProgress",
+        }},
+    })
+    proc = _FakeProcess(frames)
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: proc)
+    with pytest.raises(RuntimeError, match="before turn/start"):
+        _run(context, allow_one_turn=True)
+    methods = [json.loads(line)["method"] for line in proc.stdin.getvalue().splitlines()]
+    assert "turn/start" not in methods
+
+
+def test_nested_foreign_turn_progress_is_rejected(context, monkeypatch):
+    frames = _success_frames()
+    frames[3]["params"].pop("turnId")
+    frames[3]["params"]["turn"]["id"] = "foreign-turn"
+    proc = _FakeProcess(frames)
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: proc)
+    with pytest.raises(RuntimeError, match="nested notification belongs"):
+        _run(context, allow_one_turn=True)
+    receipt = json.loads((context[-1] / "quarantine.json").read_text("utf-8"))
+    assert receipt["turn_start_may_have_been_sent"] is True
+    assert receipt["retry_permitted"] is False
