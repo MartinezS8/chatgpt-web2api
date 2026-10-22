@@ -124,6 +124,12 @@ class _OneTurnWire:
         while True:
             message = self._next(deadline)
             if "id" not in message:
+                notification = message["method"]
+                if (method != "turn/start" and
+                        notification.startswith(("turn/", "item/"))):
+                    raise RuntimeError("turn event appeared before turn/start was attempted")
+                if method == "initialize" and notification.startswith("thread/"):
+                    raise RuntimeError("thread event appeared before thread/start")
                 if len(self._notifications) >= 128:
                     raise RuntimeError("too many pre-ack notifications")
                 self._notifications.append(message)
@@ -153,6 +159,10 @@ class _OneTurnWire:
                     foreign = params.get("turnId")
                     if foreign is not None and foreign != turn_id:
                         raise RuntimeError("notification belongs to another turn")
+                    nested = params.get("turn")
+                    if (isinstance(nested, dict) and "id" in nested
+                            and nested["id"] != turn_id):
+                        raise RuntimeError("nested notification belongs to another turn")
                 continue
             params = message.get("params")
             turn = params.get("turn") if isinstance(params, dict) else None
@@ -242,6 +252,7 @@ def run_one_local_pilot(
     receipts = Path(receipt_dir).expanduser()
     _create_intent(receipts, prompt=prompt, model=model, effort=effort, cwd=root)
     process = None
+    wire = None
     try:
         process = subprocess.Popen(
             [str(exe), "app-server"], cwd=str(root),
@@ -289,9 +300,12 @@ def run_one_local_pilot(
         _write_new_json(receipts / "result.json", result)
         return result
     except Exception as exc:
+        turn_attempted = wire is not None and wire._turn_start_attempts > 0
         _write_new_json(receipts / "quarantine.json", {
-            "status": "needs_human_unknown_or_unverified_delivery",
+            "status": ("needs_human_unknown_or_unverified_delivery" if turn_attempted
+                       else "pre_turn_failure_no_turn_start_attempted"),
             "error_type": type(exc).__name__,
+            "turn_start_may_have_been_sent": turn_attempted,
             "retry_permitted": False,
             "receipt_requires_manual_review": True,
         })

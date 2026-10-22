@@ -142,3 +142,15 @@ wirklichen Pfade der installierten Codex-Version. Ungeprüfte oder fehlende
 Pfade brechen vor dem Live-Send ab. Unpassende `thread/start`-Antworten
 verhindern den anschließenden `turn/start`. Der Test bleibt ausdrücklich
 ein einzelner bewusst gestarteter Hobby-Pilot.
+
+
+## PR #66 — Diagnose klar zwischen vor und nach Turn-Send unterscheiden
+
+Ein fehlgeschlagener lokaler Pilot schreibt weiterhin `quarantine.json`.
+Neu ist `turn_start_may_have_been_sent`: Bei `false` wurde innerhalb
+dieses Prozesses **kein** `turn/start`-Send versucht, bei `true` ist die
+Zustellung unsicher und darf nicht ohne manuelle Untersuchung wiederholt
+werden. In beiden Fällen bleibt `retry_permitted: false` und derselbe
+Receipt-Pfad kann nicht erneut verwendet werden. Verfrühte
+`turn/`-Benachrichtigungen sowie widersprüchliche verschachtelte
+Turn-IDs werden jetzt vor einer falschen Terminalbewertung abgefangen.
