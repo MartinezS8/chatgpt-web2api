@@ -38,6 +38,7 @@ class _OneTurnWire:
         self._notifications: list[dict] = []
         self._frames_seen = 0
         self._turn_start_attempts = 0
+        self._final_answers: list[str] = []
         threading.Thread(target=self._pump, daemon=True).start()
 
     def _pump(self):
@@ -151,6 +152,25 @@ class _OneTurnWire:
             if "id" in message:
                 raise RuntimeError("unexpected extra app-server RPC result")
             method = message["method"]
+            if method == "model/rerouted":
+                raise RuntimeError("model rerouting is not accepted by the pinned pilot")
+            if method == "item/completed":
+                params = message.get("params")
+                if not isinstance(params, dict) or params.get("threadId") != thread_id:
+                    raise RuntimeError("foreign or malformed agent message")
+                if params.get("turnId") != turn_id:
+                    raise RuntimeError("agent message belongs to another turn")
+                item = params.get("item")
+                if not isinstance(item, dict):
+                    raise RuntimeError("completed item must be an object")
+                if item.get("type") == "agentMessage":
+                    text = item.get("text")
+                    if not isinstance(text, str) or len(text) > 8192:
+                        raise RuntimeError("agent message missing or exceeds bounded size")
+                    if item.get("phase") in (None, "final_answer"):
+                        if len(self._final_answers) >= 8:
+                            raise RuntimeError("excessive final agent messages")
+                        self._final_answers.append(text)
             if method != "turn/completed":
                 if method.startswith(("turn/", "item/")):
                     params = message.get("params")
@@ -170,7 +190,28 @@ class _OneTurnWire:
                     or not isinstance(turn, dict) or turn.get("id") != turn_id
                     or turn.get("status") not in {"completed", "failed", "interrupted"}):
                 raise RuntimeError("unmatched or malformed turn completion")
-            return turn["status"]
+            return turn["status"], (self._final_answers[-1] if self._final_answers else None)
+
+
+
+def _verify_effective_thread_settings(response: dict, *, model: str, cwd: Path) -> None:
+    """Never conflate JSON-schema shape with effective local Codex settings.
+
+    The real app-server returns top-level model, cwd, approvalPolicy and sandbox.
+    Missing or mismatched effective values reject the pilot before turn/start.
+    """
+    sandbox = response.get("sandbox")
+    read_only = sandbox == "read-only" or sandbox == {"type": "readOnly"}
+    if (response.get("model") != model
+            or response.get("approvalPolicy") != "never"
+            or not read_only
+            or response.get("cwd") != str(cwd)):
+        raise RuntimeError("Codex effective thread model/cwd/approval/sandbox differs")
+    thread = response.get("thread")
+    if isinstance(thread, dict):
+        if thread.get("model") is not None and thread["model"] != model:
+            raise RuntimeError("Codex embedded thread model differs")
+
 
 
 def _create_intent(folder: Path, *, prompt: str, model: str, effort: str, cwd: Path):
@@ -271,6 +312,7 @@ def run_one_local_pilot(
         wire_schemas.require("thread_params", thread_params)
         thread_response = wire.rpc(2, "thread/start", thread_params)
         wire_schemas.require("thread_result", thread_response)
+        _verify_effective_thread_settings(thread_response, model=model, cwd=root)
         thread = thread_response.get("thread")
         if not isinstance(thread, dict) or not isinstance(thread.get("id"), str):
             raise RuntimeError("thread/start did not return a thread id")
@@ -285,7 +327,8 @@ def run_one_local_pilot(
         if not isinstance(turn, dict) or not isinstance(turn.get("id"), str):
             raise RuntimeError("turn/start acknowledgement lacks turn id")
         turn_id = turn["id"]
-        terminal = wire.wait_terminal(thread_id=thread_id, turn_id=turn_id)
+        terminal, answer = wire.wait_terminal(thread_id=thread_id, turn_id=turn_id)
+        answer_matches = terminal == "completed" and answer == "ORCH_TEST_OK"
         result = {
             "status": "transport_completed_unreviewed" if terminal == "completed"
                       else "turn_ended_needs_review",
@@ -296,6 +339,16 @@ def run_one_local_pilot(
             "retry_permitted": False,
             "production_finalization_permitted": False,
             "codex_version": doctor["codex_version"],
+            "effective_thread_settings_verified": True,
+            "assistant_message_observed": answer is not None,
+            "assistant_output_sha256": (
+                hashlib.sha256(answer.encode("utf-8")).hexdigest()
+                if answer is not None else None
+            ),
+            "assistant_output_preview": answer[:1024] if answer is not None else None,
+            "expected_output": "ORCH_TEST_OK",
+            "assistant_output_matches_expected": answer_matches,
+            "content_verified_by_operator": False,
         }
         _write_new_json(receipts / "result.json", result)
         return result
