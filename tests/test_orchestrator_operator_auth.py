@@ -214,3 +214,41 @@ def test_task_outbox_state_mismatch_never_creates_challenge(quarantined):
         assert db.execute(
             "SELECT COUNT(*) FROM orchestrator_operator_challenges"
         ).fetchone()[0] == 0
+
+@pytest.mark.parametrize("sql", [
+    "UPDATE orchestrator_dispatch_attempts SET status='needs_human' WHERE attempt_id=?",
+    "UPDATE orchestrator_dispatch_attempts SET updated_at=updated_at+1 WHERE attempt_id=?",
+    "UPDATE tasks SET state='needs_human' WHERE task_id=(SELECT task_id FROM orchestrator_app_server_attempts WHERE attempt_id=?)",
+    "UPDATE tasks SET claim_version=claim_version+1 WHERE task_id=(SELECT task_id FROM orchestrator_app_server_attempts WHERE attempt_id=?)",
+    "UPDATE tasks SET updated_at=updated_at+1 WHERE task_id=(SELECT task_id FROM orchestrator_app_server_attempts WHERE attempt_id=?)",
+    "UPDATE orchestrator_app_server_attempts SET assignment_version=assignment_version+1 WHERE attempt_id=?",
+])
+def test_snapshot_drift_fails_closed_without_consuming_nonce(quarantined, sql):
+    store, _, _, attempt, gate = quarantined
+    issued = gate.issue_challenge(attempt, disposition="delivery_unresolved")
+    with store._connect() as db:
+        db.execute(sql, (attempt,))
+    with pytest.raises(PermissionError, match="stale"):
+        gate.record_unresolved(attempt, nonce=issued["nonce"], version=issued["version"])
+    with store._connect() as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM orchestrator_operator_decisions"
+        ).fetchone()[0] == 0
+        assert db.execute(
+            "SELECT used FROM orchestrator_operator_challenges WHERE attempt_id=?",
+            (attempt,),
+        ).fetchone()[0] == 0
+
+
+def test_old_nonce_only_digest_does_not_pass_new_snapshot_fence(quarantined):
+    import hashlib
+
+    store, _, _, attempt, gate = quarantined
+    issued = gate.issue_challenge(attempt, disposition="delivery_unresolved")
+    with store._connect() as db:
+        db.execute(
+            "UPDATE orchestrator_operator_challenges SET nonce_sha256=? WHERE attempt_id=?",
+            (hashlib.sha256(issued["nonce"].encode("ascii")).hexdigest(), attempt),
+        )
+    with pytest.raises(PermissionError, match="mismatched"):
+        gate.record_unresolved(attempt, nonce=issued["nonce"], version=issued["version"])

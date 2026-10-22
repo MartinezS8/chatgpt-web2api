@@ -10,6 +10,7 @@ from __future__ import annotations
 import ctypes
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
@@ -126,8 +127,15 @@ class WindowsOperatorQuarantineGate:
         if type(attempt_id) is not str or not 1 <= len(attempt_id) <= 128:
             raise ValueError("invalid attempt ID")
         row = db.execute(
-            """SELECT a.status, a.updated_at, a.task_id,
-                      d.status AS outbox_status, t.state AS task_state
+            """SELECT a.attempt_id, a.status, a.updated_at, a.task_id,
+                      a.claim_version AS ledger_claim_version,
+                      a.assignment_version AS ledger_assignment_version,
+                      a.prompt_sha256 AS ledger_prompt_sha256,
+                      d.status AS outbox_status, d.updated_at AS outbox_updated_at,
+                      d.claim_token_hash AS outbox_claim_token_hash,
+                      t.state AS task_state, t.updated_at AS task_updated_at,
+                      t.claim_version AS task_claim_version,
+                      t.prompt_sha AS task_prompt_sha
                FROM orchestrator_app_server_attempts a
                JOIN orchestrator_dispatch_attempts d ON d.attempt_id=a.attempt_id
                JOIN tasks t ON t.task_id=a.task_id
@@ -142,6 +150,25 @@ class WindowsOperatorQuarantineGate:
                 }):
             raise ValueError("attempt is no longer in a conservative review state")
         return row
+
+    @staticmethod
+    def _bound_nonce_digest(nonce: str, row) -> str:
+        """HMAC one-time nonce to the complete canonical joined state fence.
+
+        Previously issued nonce-only challenge hashes intentionally fail;
+        the operator must explicitly issue a fresh challenge.
+        """
+        fields = (
+            "attempt_id", "task_id", "status", "updated_at",
+            "ledger_claim_version", "ledger_assignment_version",
+            "ledger_prompt_sha256", "outbox_status", "outbox_updated_at",
+            "outbox_claim_token_hash", "task_state", "task_updated_at",
+            "task_claim_version", "task_prompt_sha",
+        )
+        payload = json.dumps(
+            [row[field] for field in fields], ensure_ascii=True, separators=(",", ":"),
+        ).encode("ascii")
+        return hmac.new(nonce.encode("ascii"), payload, hashlib.sha256).hexdigest()
 
     def _migrate(self) -> None:
         names = {"orchestrator_operator_challenges", "orchestrator_operator_decisions"}
@@ -220,10 +247,10 @@ class WindowsOperatorQuarantineGate:
         if type(ttl) is not int or not 1 <= ttl <= 300:
             raise ValueError("challenge lifetime must be 1..300 seconds")
         nonce = secrets.token_urlsafe(32)
-        digest = hashlib.sha256(nonce.encode("ascii")).hexdigest()
         with self._store._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = self._attempt(db, attempt_id)
+            digest = self._bound_nonce_digest(nonce, row)
             if db.execute(
                 "SELECT 1 FROM orchestrator_operator_decisions WHERE attempt_id=?",
                 (attempt_id,),
@@ -258,10 +285,10 @@ class WindowsOperatorQuarantineGate:
             raise ValueError("invalid decision version")
         if type(nonce) is not str or not 20 <= len(nonce) <= 128 or not nonce.isascii():
             raise ValueError("invalid challenge nonce")
-        digest = hashlib.sha256(nonce.encode("ascii")).hexdigest()
         with self._store._connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = self._attempt(db, attempt_id)
+            digest = self._bound_nonce_digest(nonce, row)
             if db.execute(
                 "SELECT 1 FROM orchestrator_operator_decisions WHERE attempt_id=?",
                 (attempt_id,),
