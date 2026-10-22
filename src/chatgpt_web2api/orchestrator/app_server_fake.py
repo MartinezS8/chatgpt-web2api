@@ -49,6 +49,7 @@ class FakeAppServerScenario(StrEnum):
     APPROVAL_REQUEST = "approval_request"
     FOREIGN_THREAD = "foreign_thread"
     FOREIGN_TURN = "foreign_turn"
+    FOREIGN_TURN_AFTER_ACK = "foreign_turn_after_ack"
     DUPLICATE_TERMINAL = "duplicate_terminal"
     BROKEN_PIPE_BEFORE_TURN = "broken_pipe_before_turn"
     DIE_AFTER_TURN_REQUEST = "die_after_turn_request"
@@ -86,6 +87,40 @@ def _pairs_without_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             raise ValueError("duplicate JSON object key")
         result[key] = value
     return result
+
+
+def _json_string_encoded_size(value: str, *, limit: int) -> int | None:
+    """Return exact ensure_ascii=False JSON string bytes, stopping over limit."""
+    size = 2  # Opening and closing quote.
+    short_escapes = {'"', "\\", "\b", "\f", "\n", "\r", "\t"}
+    for character in value:
+        codepoint = ord(character)
+        if character in short_escapes:
+            size += 2
+        elif codepoint < 0x20:
+            size += 6  # \u00xx
+        elif 0xD800 <= codepoint <= 0xDFFF:
+            raise ProtocolRejected("synthetic prompt contains invalid Unicode")
+        else:
+            size += len(character.encode("utf-8"))
+        if size > limit:
+            return None
+    return size
+
+
+def _require_jsonl_string_fits(
+    probe_request: dict[str, Any],
+    value: str,
+    *,
+    max_frame_bytes: int,
+) -> None:
+    """Reject a large request string before serializing its full contents."""
+    probe_frame = json.dumps(
+        probe_request, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8") + b"\n"
+    value_size = _json_string_encoded_size(value, limit=max_frame_bytes)
+    if value_size is None or len(probe_frame) - 3 + value_size > max_frame_bytes:
+        raise _FrameTooLarge("outbound JSONL frame exceeds limit")
 
 
 class _FakeJsonlProcess:
@@ -205,7 +240,7 @@ class _FakeJsonlProcess:
                 object_pairs_hook=_pairs_without_duplicates,
                 parse_constant=lambda _value: (_ for _ in ()).throw(ValueError()),
             )
-        except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        except (UnicodeDecodeError, json.JSONDecodeError, RecursionError, ValueError):
             raise UnknownDelivery("app-server emitted malformed JSONL") from None
         if not isinstance(message, dict):
             raise UnknownDelivery("app-server emitted a non-object JSONL message")
@@ -222,7 +257,7 @@ class _FakeJsonlProcess:
             frame = json.dumps(
                 message, ensure_ascii=False, separators=(",", ":"), allow_nan=False
             ).encode("utf-8") + b"\n"
-        except (TypeError, ValueError):
+        except (TypeError, UnicodeEncodeError, ValueError):
             raise ProtocolRejected("outbound JSONL message is invalid") from None
         if len(frame) > self._max_frame_bytes:
             raise _FrameTooLarge("outbound JSONL frame exceeds limit")
@@ -378,7 +413,8 @@ class OfflineFakeAppServer:
 
     __slots__ = (
         "_binding", "_scenario", "_model", "_effort", "_timeout_seconds",
-        "_max_frame_bytes", "_max_queued_messages", "_run_started", "_transport",
+        "_max_frame_bytes", "_max_queued_messages", "_run_started", "_run_guard",
+        "_transport",
         "_delivery_status", "_process_exit_code", "_shutdown_mode",
     )
 
@@ -397,8 +433,8 @@ class OfflineFakeAppServer:
             raise TypeError("an immutable offline AttemptBinding is required")
         if not isinstance(scenario, FakeAppServerScenario):
             raise TypeError("scenario must be an enumerated fake-only behavior")
-        if (not isinstance(model, str) or not model.strip()
-                or not isinstance(effort, str) or not effort.strip()):
+        if (not isinstance(model, str) or not model or model.isspace()
+                or not isinstance(effort, str) or not effort or effort.isspace()):
             raise ValueError("exact synthetic model and effort are required")
         if (type(timeout_seconds) not in {int, float}
                 or not math.isfinite(timeout_seconds)
@@ -416,6 +452,7 @@ class OfflineFakeAppServer:
         self._max_frame_bytes = max_frame_bytes
         self._max_queued_messages = max_queued_messages
         self._run_started = False
+        self._run_guard = threading.Lock()
         self._transport: _FakeJsonlProcess | None = None
         self._delivery_status = "not_started"
         self._process_exit_code: int | None = None
@@ -449,57 +486,106 @@ class OfflineFakeAppServer:
                 if self._transport is not None else 0)
 
     def run(self, *, prompt: str, cwd: str) -> dict[str, Any]:
+        if not self._run_guard.acquire(blocking=False):
+            raise ProtocolRejected("offline fake attempt is already running")
+        try:
+            return self._run_once(prompt=prompt, cwd=cwd)
+        finally:
+            self._run_guard.release()
+
+    def _run_once(self, *, prompt: str, cwd: str) -> dict[str, Any]:
         if self._run_started:
             if self._delivery_status == "unknown_delivery":
                 raise UnknownDelivery("attempt is already quarantined; no retry is allowed")
             raise ProtocolRejected("offline fake attempt can run only once")
         self._run_started = True
-        if not isinstance(prompt, str) or not prompt.strip() or not isinstance(cwd, str) or not cwd.strip():
+        if not isinstance(prompt, str) or not isinstance(cwd, str):
             self._delivery_status = "not_sent"
             raise ProtocolRejected("synthetic prompt and explicit working directory are required")
-        self._delivery_status = "running_offline_fake"
-        contract = OfflineAppServerContract(self._model, self._effort)
-        self._transport = _FakeJsonlProcess(
-            self._scenario,
-            max_frame_bytes=self._max_frame_bytes,
-            max_queued_messages=self._max_queued_messages,
-        )
+        binding = self._binding
+        model = self._model
+        effort = self._effort
+        scenario = self._scenario
+        timeout_seconds = self._timeout_seconds
+        max_frame_bytes = self._max_frame_bytes
+        max_queued_messages = self._max_queued_messages
         try:
-            self._transport.start()
+            for value in (prompt, cwd):
+                if _json_string_encoded_size(value, limit=max_frame_bytes) is None:
+                    raise _FrameTooLarge("outbound JSONL frame exceeds limit")
+            if not prompt or prompt.isspace() or not cwd or cwd.isspace():
+                raise ProtocolRejected(
+                    "synthetic prompt and explicit working directory are required"
+                )
+        except ProtocolRejected:
+            self._delivery_status = "not_sent"
+            raise
+        self._delivery_status = "running_offline_fake"
+        contract = OfflineAppServerContract(model, effort)
+        transport = _FakeJsonlProcess(
+            scenario,
+            max_frame_bytes=max_frame_bytes,
+            max_queued_messages=max_queued_messages,
+        )
+        self._transport = transport
+        try:
+            transport.start()
 
             def exchange(request: dict[str, Any]) -> None:
-                response = self._transport.request(
+                response = transport.request(
                     request,
                     on_notification=contract.receive_event,
-                    timeout_seconds=self._timeout_seconds,
+                    timeout_seconds=timeout_seconds,
                 )
                 contract.receive_response(response)
 
             exchange(contract.initialize())
-            self._transport.notify(contract.initialized())
+            transport.notify(contract.initialized())
             exchange(contract.model_list())
-            exchange(contract.thread_start(cwd=cwd))
-            exchange(contract.turn_start(prompt))
+            thread_request = contract.thread_start(cwd=cwd)
+            thread_params = thread_request["params"]
+            thread_probe = {
+                **thread_request,
+                "params": {**thread_params, "cwd": "x"},
+            }
+            _require_jsonl_string_fits(
+                thread_probe, cwd, max_frame_bytes=max_frame_bytes
+            )
+            exchange(thread_request)
+            turn_request = contract.turn_start(prompt)
+            turn_params = turn_request["params"]
+            text_item = turn_params["input"][0]
+            probe_request = {
+                **turn_request,
+                "params": {
+                    **turn_params,
+                    "input": [{**text_item, "text": "x"}],
+                },
+            }
+            _require_jsonl_string_fits(
+                probe_request, prompt, max_frame_bytes=max_frame_bytes
+            )
+            exchange(turn_request)
             while contract.state == "turn_active":
-                self._transport.read_notification(
+                transport.read_notification(
                     on_notification=contract.receive_event,
-                    timeout_seconds=self._timeout_seconds,
+                    timeout_seconds=timeout_seconds,
                 )
-            self._transport.finish(
+            transport.finish(
                 on_notification=contract.receive_event,
-                timeout_seconds=self._timeout_seconds,
+                timeout_seconds=timeout_seconds,
             )
             self._delivery_status = contract.state
-            self._process_exit_code = self._transport.exit_code
-            self._shutdown_mode = self._transport.shutdown_mode
+            self._process_exit_code = transport.exit_code
+            self._shutdown_mode = transport.shutdown_mode
             return {
                 "state": contract.state,
                 "thread_id": contract.thread_id,
                 "turn_id": contract.turn_id,
-                "model": self._model,
-                "effort": self._effort,
-                "worker_id": self._binding.worker_id,
-                "attempt_id": self._binding.attempt_id,
+                "model": model,
+                "effort": effort,
+                "worker_id": binding.worker_id,
+                "attempt_id": binding.attempt_id,
                 "assurance": "offline_fake_only",
                 "live_send_permitted": False,
                 "production_finalization_permitted": False,
@@ -520,8 +606,8 @@ class OfflineFakeAppServer:
             graceful = self._delivery_status in {
                 "transport_completed_unverified", "needs_human"
             }
-            self._process_exit_code = self._transport.close(graceful=graceful)
-            self._shutdown_mode = self._transport.shutdown_mode
+            self._process_exit_code = transport.close(graceful=graceful)
+            self._shutdown_mode = transport.shutdown_mode
 
     def __repr__(self) -> str:
         return (

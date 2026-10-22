@@ -1,10 +1,13 @@
 """Offline fake app-server JSONL integration tests; never invoke a Codex CLI."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import FrozenInstanceError
+from threading import Event
 
 import pytest
 
+import chatgpt_web2api.orchestrator.app_server_fake as app_server_fake
 from chatgpt_web2api.orchestrator.app_server_fake import (
     AttemptBinding,
     FakeAppServerScenario,
@@ -107,7 +110,6 @@ def test_transport_limits_are_finite_and_bounded(kwargs):
         FakeAppServerScenario.TRUNCATED_JSONL,
         FakeAppServerScenario.DUPLICATE_JSON_KEYS,
         FakeAppServerScenario.OVERSIZED_OUTPUT,
-        FakeAppServerScenario.OUTPUT_FLOOD,
         FakeAppServerScenario.WRONG_REQUEST_ID,
         FakeAppServerScenario.APPROVAL_REQUEST,
         FakeAppServerScenario.FOREIGN_THREAD,
@@ -171,11 +173,163 @@ def test_prompt_echo_is_not_retained_in_result_logs_or_session_repr(tmp_path, ca
     assert SYNTHETIC_PROMPT not in repr(worker)
 
 
-def test_oversized_outbound_prompt_is_rejected_before_turn_bytes(tmp_path):
+@pytest.mark.parametrize("prompt", ["x" * 8192, "x\n" * 1500, "é" * 2048])
+def test_oversized_outbound_prompt_is_rejected_before_turn_bytes(
+    tmp_path, monkeypatch, prompt
+):
     worker = session(tmp_path, max_frame_bytes=4096)
+    serialized_prompt_sizes = []
+    original_dumps = app_server_fake.json.dumps
+
+    def track_prompt_serialization(value, *args, **kwargs):
+        if isinstance(value, dict) and value.get("method") == "turn/start":
+            prompt = value["params"]["input"][0]["text"]
+            serialized_prompt_sizes.append(len(prompt))
+        return original_dumps(value, *args, **kwargs)
+
+    monkeypatch.setattr(app_server_fake.json, "dumps", track_prompt_serialization)
 
     with pytest.raises(ProtocolRejected, match="outbound JSONL frame exceeds limit"):
-        worker.run(prompt="x" * 8192, cwd=str(tmp_path))
+        worker.run(prompt=prompt, cwd=str(tmp_path))
 
     assert worker.request_count("turn/start") == 0
     assert worker.delivery_status == "not_sent"
+    assert serialized_prompt_sizes == []
+
+
+def test_oversized_cwd_is_rejected_before_thread_request_serialization(tmp_path, monkeypatch):
+    worker = session(tmp_path, max_frame_bytes=4096)
+    serialized_cwd_sizes = []
+    original_dumps = app_server_fake.json.dumps
+
+    def track_cwd_serialization(value, *args, **kwargs):
+        if isinstance(value, dict) and value.get("method") == "thread/start":
+            serialized_cwd_sizes.append(len(value["params"]["cwd"]))
+        return original_dumps(value, *args, **kwargs)
+
+    monkeypatch.setattr(app_server_fake.json, "dumps", track_cwd_serialization)
+    with pytest.raises(ProtocolRejected, match="outbound JSONL frame exceeds limit"):
+        worker.run(prompt=SYNTHETIC_PROMPT, cwd="C:\\" + "x" * 8192)
+
+    assert worker.request_count("thread/start") == 0
+    assert worker.request_count("turn/start") == 0
+    assert worker.delivery_status == "not_sent"
+    assert serialized_cwd_sizes == []
+
+
+def test_concurrent_run_is_rejected_without_replacing_first_transport(tmp_path, monkeypatch):
+    worker = session(tmp_path, timeout_seconds=5)
+    first_request_entered = Event()
+    release_first_request = Event()
+    original_request = app_server_fake._FakeJsonlProcess.request
+
+    def pause_first_request(transport, request, **kwargs):
+        if request.get("method") == "initialize":
+            first_request_entered.set()
+            if not release_first_request.wait(timeout=5):
+                raise AssertionError("test did not release first fake request")
+        return original_request(transport, request, **kwargs)
+
+    monkeypatch.setattr(app_server_fake._FakeJsonlProcess, "request", pause_first_request)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(worker.run, prompt=SYNTHETIC_PROMPT, cwd=str(tmp_path))
+        assert first_request_entered.wait(timeout=5)
+        second = executor.submit(worker.run, prompt=SYNTHETIC_PROMPT, cwd=str(tmp_path))
+        try:
+            with pytest.raises(ProtocolRejected, match="already running"):
+                second.result(timeout=3)
+        finally:
+            release_first_request.set()
+        result = first.result(timeout=10)
+
+    assert result["state"] == "transport_completed_unverified"
+    assert worker.request_count("turn/start") == 1
+    assert worker.process_exit_code == 0
+    assert worker.shutdown_mode == "stdin_eof"
+
+
+def test_attempt_result_uses_binding_captured_at_start(tmp_path, monkeypatch):
+    original_binding = binding()
+    worker = OfflineFakeAppServer(original_binding)
+    finish = app_server_fake._FakeJsonlProcess.finish
+
+    def finish_then_rebind(transport, **kwargs):
+        result = finish(transport, **kwargs)
+        worker._binding = AttemptBinding(
+            controller_id="controller-rebound",
+            worker_id="worker-rebound",
+            account_id="account-rebound",
+            project_id="project-rebound",
+            task_id="task-rebound",
+            attempt_id="attempt-rebound",
+        )
+        return result
+
+    monkeypatch.setattr(app_server_fake._FakeJsonlProcess, "finish", finish_then_rebind)
+    result = worker.run(prompt=SYNTHETIC_PROMPT, cwd=str(tmp_path))
+
+    assert result["worker_id"] == original_binding.worker_id
+    assert result["attempt_id"] == original_binding.attempt_id
+
+
+def test_output_flood_is_rejected_by_queue_limit_not_timeout(tmp_path, monkeypatch):
+    worker = session(
+        tmp_path,
+        FakeAppServerScenario.OUTPUT_FLOOD,
+        timeout_seconds=5,
+        max_queued_messages=1,
+    )
+    next_raw = app_server_fake._FakeJsonlProcess._next_raw
+
+    def hold_consumer_until_output_queue_fails(transport, deadline):
+        if (transport._scenario is FakeAppServerScenario.OUTPUT_FLOOD
+                and transport.request_count("model/list") == 1):
+            assert transport._fatal.wait(timeout=5)
+        return next_raw(transport, deadline)
+
+    monkeypatch.setattr(
+        app_server_fake._FakeJsonlProcess,
+        "_next_raw",
+        hold_consumer_until_output_queue_fails,
+    )
+    with pytest.raises(UnknownDelivery, match="output queue exceeded its message limit"):
+        worker.run(prompt=SYNTHETIC_PROMPT, cwd=str(tmp_path))
+
+    assert worker.delivery_status == "unknown_delivery"
+    assert worker.request_count("turn/start") == 0
+
+
+def test_deeply_nested_bounded_json_is_quarantined(tmp_path):
+    depth = 5000
+    frame = b'{"nested":' + b"[" * depth + b"0" + b"]" * depth + b"}\n"
+    assert len(frame) < 65_536
+
+    with pytest.raises(UnknownDelivery, match="malformed JSONL"):
+        app_server_fake._FakeJsonlProcess._decode(frame)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ['quote"', "slash\\", "\x00\x1f\b\f\n\r\t", "é", "🧪", "plain"],
+)
+def test_bounded_json_string_size_matches_encoder(value):
+    expected = len(app_server_fake.json.dumps(
+        value, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8"))
+
+    assert app_server_fake._json_string_encoded_size(value, limit=1024) == expected
+
+
+def test_bounded_json_string_size_rejects_lone_surrogate():
+    with pytest.raises(ProtocolRejected, match="invalid Unicode"):
+        app_server_fake._json_string_encoded_size("\ud800", limit=1024)
+
+
+def test_foreign_turn_started_after_ack_is_rejected(tmp_path):
+    worker = session(tmp_path, FakeAppServerScenario.FOREIGN_TURN_AFTER_ACK)
+
+    with pytest.raises(ProtocolRejected, match="different turn"):
+        worker.run(prompt=SYNTHETIC_PROMPT, cwd=str(tmp_path))
+
+    assert worker.delivery_status == "needs_human"
+    assert worker.request_count("turn/start") == 1

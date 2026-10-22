@@ -204,6 +204,12 @@ def serve(scenario: str) -> int:
             return 0
         response_id = request_id + 1 if scenario == "wrong_request_id" else request_id
         _emit(_response(response_id, {"turn": turn}))
+        if scenario == "foreign_turn_after_ack":
+            _emit(_event("turn/started", {
+                "threadId": _THREAD_ID,
+                "turn": {"id": "foreign-turn-48b", "items": [], "status": "inProgress"},
+            }))
+            return 0
         status = "interrupted" if scenario == "interrupted" else "completed"
         terminal = _event("turn/completed", {
             "threadId": _THREAD_ID,
@@ -224,6 +230,7 @@ def main(argv: list[str] | None = None) -> int:
         "success", "malformed_json", "oversized_output", "wrong_request_id",
         "truncated_jsonl", "duplicate_json_keys",
         "approval_request", "foreign_thread", "foreign_turn", "duplicate_terminal",
+        "foreign_turn_after_ack",
         "broken_pipe_before_turn", "die_after_turn_request", "timeout_after_turn_request",
         "interrupted", "echo_prompt", "model_mismatch", "output_flood",
     }

@@ -15,7 +15,7 @@ class ProtocolRejected(ValueError):
 
 
 def _nonempty(value: Any) -> bool:
-    return isinstance(value, str) and bool(value.strip())
+    return isinstance(value, str) and bool(value) and not value.isspace()
 
 
 @dataclass
@@ -220,17 +220,26 @@ class OfflineAppServerContract:
             expected_turn_id is None or event_turn_id != expected_turn_id
         ):
             self._reject("item notification is missing its bound turn id")
-        if method == "turn/started" and self.state == "turn_pending":
+        if method == "turn/started":
             turn = params.get("turn")
             if (params.get("threadId") != self.thread_id or not isinstance(turn, dict)
                     or not _nonempty(turn.get("id"))
                     or turn.get("status") != "inProgress"
                     or not isinstance(turn.get("items"), list)):
-                self._reject("invalid pre-ack turn notification")
-            if self.early_turn_id is not None and self.early_turn_id != turn["id"]:
-                self._reject("inconsistent pre-ack turn ids")
-            self.early_turn_id = turn["id"]
-            return "pending_turn_ack"
+                self._reject("invalid turn/started notification")
+            nested_turn_id = turn["id"]
+            if event_turn_id is not None and event_turn_id != nested_turn_id:
+                self._reject("turn/started contains inconsistent turn ids")
+            if self.state == "turn_pending":
+                if self.early_turn_id is not None and self.early_turn_id != nested_turn_id:
+                    self._reject("inconsistent pre-ack turn ids")
+                self.early_turn_id = nested_turn_id
+                return "pending_turn_ack"
+            if self.state == "turn_active":
+                if nested_turn_id != self.turn_id:
+                    self._reject("turn/started belongs to a different turn")
+                return "ignored_unverified"
+            self._reject("unexpected turn/started notification")
         # Other progress notifications may contain model output or secrets:
         # do not persist or return their content from this contract.
         if method != "turn/completed":
