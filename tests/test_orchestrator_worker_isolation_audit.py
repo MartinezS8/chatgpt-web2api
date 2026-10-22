@@ -118,4 +118,5 @@ def test_missing_operation_markers_are_inconclusive_not_false_denial(tmp_path, m
     assert report["checks"]["read"] == "ALLOWED"
     for operation in ("append", "rename", "delete"):
         assert report["checks"][operation] == "INCONCLUSIVE_MISSING"
+    assert not (root / audit._APPEND_MARKER).exists()
     assert original.read_bytes() == b"synthetic original"
