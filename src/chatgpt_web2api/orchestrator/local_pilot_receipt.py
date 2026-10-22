@@ -6,6 +6,7 @@ claims, never independent evidence of actual provider execution.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -42,6 +43,16 @@ def inspect_local_pilot_receipt(folder_value: str | Path) -> dict:
 
     status = "INCONSISTENT_RECEIPT"
     turn_attempted = None
+    # This is a locally consistent hash link, not a signature/third-party
+    # delivery proof; legacy receipts may lack the field.
+    observed = result if result is not None else quarantine
+    observed_hash = observed.get("intent_sha256") if observed is not None else None
+    binding_verified = False
+    if observed_hash is not None and intent is not None:
+        actual_hash = hashlib.sha256((folder / "intent.json").read_bytes()).hexdigest()
+        binding_verified = (
+            type(observed_hash) is str and observed_hash == actual_hash
+        )
     if intent is None:
         detail = "intent file is missing or write was interrupted"
     elif (intent.get("max_turn_starts") != 1
@@ -52,6 +63,8 @@ def inspect_local_pilot_receipt(folder_value: str | Path) -> dict:
         detail = "intent binding is malformed"
     elif result is not None and quarantine is not None:
         detail = "both result and quarantine exist"
+    elif observed_hash is not None and not binding_verified:
+        detail = "result/quarantine intent hash binding does not match"
     elif result is not None:
         terminal = result.get("turn_terminal_status")
         good = (
@@ -107,5 +120,6 @@ def inspect_local_pilot_receipt(folder_value: str | Path) -> dict:
         "same_receipt_directory_reusable": False,
         "production_finalization_permitted": False,
         "provider_output_independently_verified": False,
+        "receipt_intent_binding_verified": binding_verified,
         "read_only_inspection": True,
     }

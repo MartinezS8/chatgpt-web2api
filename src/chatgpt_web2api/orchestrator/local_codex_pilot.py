@@ -227,6 +227,7 @@ def _create_intent(folder: Path, *, prompt: str, model: str, effort: str, cwd: P
         "created_unix": time.time(),
     }
     _write_new_json(folder / "intent.json", record)
+    return hashlib.sha256((folder / "intent.json").read_bytes()).hexdigest()
 
 
 def _write_new_json(path: Path, payload: dict):
@@ -300,7 +301,9 @@ def run_one_local_pilot(
         raise ValueError("catalog model slug is invalid")
     exe = Path(executable).expanduser()
     receipts = Path(receipt_dir).expanduser()
-    _create_intent(receipts, prompt=prompt, model=model, effort=effort, cwd=root)
+    intent_sha = _create_intent(
+        receipts, prompt=prompt, model=model, effort=effort, cwd=root,
+    )
     process = None
     wire = None
     try:
@@ -346,6 +349,7 @@ def run_one_local_pilot(
             "turn_id": turn_id,
             "live_turn_started": True,
             "retry_permitted": False,
+            "intent_sha256": intent_sha,
             "production_finalization_permitted": False,
             "codex_version": doctor["codex_version"],
             "selected_catalog_id": model,
@@ -375,6 +379,7 @@ def run_one_local_pilot(
             "turn_start_may_have_been_sent": turn_attempted,
             "retry_permitted": False,
             "receipt_requires_manual_review": True,
+            "intent_sha256": intent_sha,
         })
         raise
     finally:
