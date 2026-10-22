@@ -16,7 +16,14 @@ class _RetainStdin(io.BytesIO):
 
 
 class _FakeProcess:
+    _test_cwd = None
+
     def __init__(self, data):
+        for frame in data:
+            if (isinstance(frame, dict) and frame.get("id") == 2
+                    and isinstance(frame.get("result"), dict)
+                    and frame["result"].get("cwd") == "__TEST_CWD__"):
+                frame["result"]["cwd"] = str(self._test_cwd)
         self.stdin = _RetainStdin()
         self.stdout = io.BytesIO(b"".join(
             (json.dumps(frame) + "\n").encode("utf-8")
@@ -74,6 +81,7 @@ def context(tmp_path, monkeypatch):
     }), encoding="utf-8")
     cwd = tmp_path / "scratch"
     cwd.mkdir()
+    _FakeProcess._test_cwd = cwd
     receipt = tmp_path / "first-attempt"
     monkeypatch.setattr(pilot, "local_pilot_doctor", lambda *a, **kw: {
         "codex_version": "codex-cli fixture",
@@ -103,7 +111,9 @@ def _success_frames():
         {"id": 1, "result": {"userAgent": "codex fixture"}},
         {"method": "thread/started", "params": {"thread": {"id": "thread-x"}}},
         {"id": 2, "result": {"thread": {
-            "id": "thread-x", "sessionId": "thread-x", "source": "synthetic"}}},
+            "id": "thread-x", "sessionId": "thread-x", "source": "synthetic"},
+            "model": "available", "approvalPolicy": "never",
+            "sandbox": {"type": "readOnly"}, "cwd": "__TEST_CWD__"}},
         {"method": "turn/started", "params": {
             "threadId": "thread-x", "turnId": "turn-x",
             "turn": {"id": "turn-x", "status": "inProgress"}}},
@@ -295,3 +305,71 @@ def test_nested_foreign_turn_progress_is_rejected(context, monkeypatch):
     receipt = json.loads((context[-1] / "quarantine.json").read_text("utf-8"))
     assert receipt["turn_start_may_have_been_sent"] is True
     assert receipt["retry_permitted"] is False
+
+
+def test_final_agent_output_is_verified_separately_from_transport(context, monkeypatch):
+    frames = _success_frames()
+    frames.insert(-1, {
+        "method": "item/completed", "params": {
+            "threadId": "thread-x", "turnId": "turn-x",
+            "item": {"id": "item-x", "type": "agentMessage",
+                     "phase": "final_answer", "text": "ORCH_TEST_OK"},
+        },
+    })
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: _FakeProcess(frames))
+    result = _run(context, allow_one_turn=True)
+    assert result["assistant_message_observed"] is True
+    assert result["assistant_output_matches_expected"] is True
+    assert result["content_verified_by_operator"] is False
+
+
+def test_completed_turn_with_wrong_text_is_not_output_verified(context, monkeypatch):
+    frames = _success_frames()
+    frames.insert(-1, {
+        "method": "item/completed", "params": {
+            "threadId": "thread-x", "turnId": "turn-x",
+            "item": {"type": "agentMessage", "phase": "final_answer",
+                     "text": "NOT_THE_EXPECTED_TEXT"},
+        },
+    })
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: _FakeProcess(frames))
+    result = _run(context, allow_one_turn=True)
+    assert result["status"] == "transport_completed_unreviewed"
+    assert result["assistant_output_matches_expected"] is False
+
+
+@pytest.mark.parametrize("property,value", [
+    ("model", "another-model"), ("sandbox", {"type": "dangerFullAccess"}),
+    ("approvalPolicy", "on-request"), ("cwd", "C:/different"),
+])
+def test_effective_thread_settings_mismatch_blocks_turn(context, monkeypatch, property, value):
+    frames = _success_frames()
+    frames[2]["result"][property] = value
+    process = _FakeProcess(frames)
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: process)
+    with pytest.raises(RuntimeError, match="effective thread"):
+        _run(context, allow_one_turn=True)
+    assert "turn/start" not in [
+        json.loads(s)["method"] for s in process.stdin.getvalue().splitlines()
+    ]
+
+
+def test_model_reroute_is_not_accepted_as_success(context, monkeypatch):
+    frames = _success_frames()
+    frames.insert(-1, {"method": "model/rerouted", "params": {
+        "fromModel": "available", "toModel": "different",
+        "reason": "capacity",
+    }})
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: _FakeProcess(frames))
+    with pytest.raises(RuntimeError, match="rerouting"):
+        _run(context, allow_one_turn=True)
+    assert (context[-1] / "quarantine.json").exists()
+
+
+def test_completed_turn_without_agent_message_cannot_claim_output_match(context, monkeypatch):
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: _FakeProcess(
+        _success_frames(),
+    ))
+    result = _run(context, allow_one_turn=True)
+    assert result["assistant_message_observed"] is False
+    assert result["assistant_output_matches_expected"] is False
