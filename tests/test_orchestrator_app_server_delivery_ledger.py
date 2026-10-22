@@ -212,6 +212,30 @@ def test_unknown_fake_delivery_recovery_is_explicit_and_never_replays(assigned):
     assert replay.request_count("turn/start") == 0
 
 
+def test_partial_client_frame_write_is_quarantined_without_second_turn(assigned):
+    store, outbox, claim, binding, ledger, prompt = _prepared(assigned)
+    fake = OfflineFakeAppServer(
+        binding, scenario=FakeAppServerScenario.PARTIAL_CLIENT_SEND_BEFORE_TURN
+    )
+
+    with pytest.raises(UnknownDelivery, match="partial frame"):
+        ledger.run_fake(fake, claim_token=claim, prompt=prompt, cwd="C:/synthetic/worktree")
+
+    turn_messages = [row for row in _message_rows(store, binding.attempt_id)
+                     if row["method"] == "turn/start"]
+    assert len(turn_messages) == 1
+    assert turn_messages[0]["status"] == "unknown"
+    assert fake.request_count("turn/start") == 1
+    assert ledger.get(binding.attempt_id)["status"] == "unknown_delivery"
+    assert outbox.get(binding.attempt_id)["status"] == "unknown"
+    assert store.get(binding.task_id)["state"] == TaskState.UNKNOWN_DELIVERY.value
+
+    replay = OfflineFakeAppServer(binding)
+    with pytest.raises(UnknownDelivery):
+        ledger.run_fake(replay, claim_token=claim, prompt=prompt, cwd="C:/synthetic/worktree")
+    assert replay.request_count("turn/start") == 0
+
+
 def test_duplicate_acknowledgement_is_idempotent_and_conflicting_replay_is_rejected(assigned):
     _, _, claim, binding, ledger, prompt = _prepared(assigned)
     ledger._prepare(OfflineFakeAppServer(binding), claim_token=claim, prompt=prompt)

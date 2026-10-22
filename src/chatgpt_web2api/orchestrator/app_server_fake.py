@@ -55,6 +55,7 @@ class FakeAppServerScenario(StrEnum):
     FOREIGN_TURN_AFTER_ACK = "foreign_turn_after_ack"
     DUPLICATE_TERMINAL = "duplicate_terminal"
     BROKEN_PIPE_BEFORE_TURN = "broken_pipe_before_turn"
+    PARTIAL_CLIENT_SEND_BEFORE_TURN = "partial_client_send_before_turn"
     DIE_AFTER_TURN_REQUEST = "die_after_turn_request"
     TIMEOUT_AFTER_TURN_REQUEST = "timeout_after_turn_request"
     INTERRUPTED = "interrupted"
@@ -282,6 +283,14 @@ class _FakeJsonlProcess:
                 self._notification_counts[method] = self._notification_counts.get(method, 0) + 1
             try:
                 assert process.stdin is not None
+                if (self._scenario == FakeAppServerScenario.PARTIAL_CLIENT_SEND_BEFORE_TURN
+                        and method == "turn/start"):
+                    # Model a local pipe interruption after a prefix reached
+                    # the child but before a complete newline-delimited frame.
+                    process.stdin.write(frame[:max(1, len(frame) // 2)])
+                    process.stdin.flush()
+                    self._unknown = True
+                    raise UnknownDelivery("app-server stdin stopped during a partial frame")
                 process.stdin.write(frame)
                 process.stdin.flush()
             except (BrokenPipeError, OSError, ValueError):

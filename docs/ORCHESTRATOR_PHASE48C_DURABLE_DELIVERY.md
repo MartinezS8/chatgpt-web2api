@@ -71,8 +71,9 @@ context, and same-user processes are not an OS isolation boundary.
 The regression tests cover successful synthetic correlation, hashes-only
 ledger content, worker/claim/prompt mismatch rejection, restart no-replay,
 duplicate and conflicting acknowledgements, observer redaction and mutation
-rejection, future-schema rejection, and crash boundaries before write, after
-write, before and after acknowledgement persistence, and after terminal event.
+rejection, future-schema rejection, a partial client-frame write, and crash
+boundaries before write, after flush, before and after acknowledgement
+persistence, and after terminal event.
 All prompts, IDs, packages and receipts in these tests are synthetic. The test
 suite does not exercise a real Codex process or provider.
 

@@ -231,7 +231,8 @@ def main(argv: list[str] | None = None) -> int:
         "truncated_jsonl", "duplicate_json_keys",
         "approval_request", "foreign_thread", "foreign_turn", "duplicate_terminal",
         "foreign_turn_after_ack",
-        "broken_pipe_before_turn", "die_after_turn_request", "timeout_after_turn_request",
+        "broken_pipe_before_turn", "partial_client_send_before_turn",
+        "die_after_turn_request", "timeout_after_turn_request",
         "interrupted", "echo_prompt", "model_mismatch", "output_flood",
     }
     if args.scenario not in allowed:
