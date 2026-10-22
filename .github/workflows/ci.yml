@@ -67,7 +67,7 @@ jobs:
     name: Windows wheel build and installed CLI smokes / Python 3.12
     needs: [offline-suite, secret-scan]
     runs-on: windows-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - name: Checkout exact revision
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -118,3 +118,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Installed orchestrator module help failed.' }
           & $wheelPython -m chatgpt_web2api.orchestrator capabilities
           if ($LASTEXITCODE -ne 0) { throw 'Installed orchestrator capabilities smoke failed.' }
+      - name: Installed-wheel five-worker demo, crash recovery and read-only MCP
+        shell: bash
+        env:
+          W2A_E2E_RUN: '0'
+        run: |
+          python -c 'import os,subprocess,sys; py=os.path.join(os.environ["RUNNER_TEMP"],"w2a-wheel-smoke","Scripts","python.exe"); sys.exit(subprocess.call([py,"-I","scripts/smoke_offline_mvp.py","--output",os.path.join(os.environ["RUNNER_TEMP"],"offline-mvp-receipt.json")]))'

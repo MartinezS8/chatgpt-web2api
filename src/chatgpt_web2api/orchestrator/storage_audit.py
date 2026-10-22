@@ -55,10 +55,16 @@ def _probe(surface):
         workspace.blobs.mkdir()
         policy = PrivateStoragePolicy.open(workspace.root.name)
         if surface == "hot_recovery_journal":
+            # A small number of rows still exceeds the five-page child cache,
+            # forcing a genuine journal spill without making this probe depend
+            # on long bulk updates on slower hosted Windows runners.
+            hot_journal_rows = 64
             seeded = sqlite3.connect(policy.context.database)
             try:
                 seeded.execute("CREATE TABLE payloads(payload BLOB)")
-                seeded.executemany("INSERT INTO payloads VALUES(zeroblob(1200))", [()] * 6000)
+                seeded.executemany(
+                    "INSERT INTO payloads VALUES(zeroblob(1200))", [()] * hot_journal_rows
+                )
                 seeded.commit()
             finally:
                 seeded.close()
@@ -147,8 +153,8 @@ except OSError as error:
                     finally:
                         checked.close()
                     observation["recovered_payload_bytes"] = observed_size
-                    observation["expected_payload_bytes"] = 6000 * 1200
-                    rollback_lost = observed_size != 6000 * 1200
+                    observation["expected_payload_bytes"] = hot_journal_rows * 1200
+                    rollback_lost = observed_size != hot_journal_rows * 1200
                 except sqlite3.Error:
                     observation["recovery_inspection"] = "inconclusive"
             status = classify(

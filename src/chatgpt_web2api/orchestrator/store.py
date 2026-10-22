@@ -1,4 +1,4 @@
-"""Durable, conservative SQLite task/lease store (Python 3.11 stdlib)."""
+"""Durable, conservative SQLite task/lease store (Python 3.12 stdlib)."""
 from __future__ import annotations
 
 import hashlib
@@ -13,6 +13,7 @@ from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum, StrEnum
 from pathlib import Path
+from threading import local
 
 
 class TaskState(StrEnum):
@@ -120,6 +121,7 @@ def _overlaps(a: str, b: str) -> bool:
 class Store:
     def __init__(self, database: str | Path, *, storage_policy=None):
         self._storage_policy = storage_policy
+        self._connection_local = local()
         if storage_policy is not None:
             from .storage_policy import checked_policy
             checked_policy(storage_policy).database(database)
@@ -144,6 +146,27 @@ class Store:
         if self.storage_policy is not None:
             from .storage_policy import checked_policy
             checked_policy(self.storage_policy).database(self.path)
+        scoped = getattr(self._connection_local, "entry", None)
+        if scoped is not None:
+            if (scoped["path"] != self.path or scoped["policy"] is not self.storage_policy
+                    or not set_wal or pin_rollback_journal):
+                raise ValueError("scoped connection mode/path/policy changed")
+            if scoped["in_use"]:
+                raise RuntimeError("nested Store operations cannot share a transaction")
+            db = scoped["db"]
+            scoped["in_use"] = True
+            try:
+                yield db
+                self.storage_policy.database(self.path)
+                if db.in_transaction:
+                    db.commit()
+            except BaseException:
+                if db.in_transaction:
+                    db.rollback()
+                raise
+            finally:
+                scoped["in_use"] = False
+            return
         pin = (self.storage_policy.database_session(
             self.path, create=True, pin_rollback_journal=pin_rollback_journal,
         ) if self.storage_policy is not None else nullcontext())
@@ -152,6 +175,31 @@ class Store:
                 set_wal=set_wal,
             ) as db:
                 yield db
+
+    @contextmanager
+    def connection_scope(self):
+        """Reuse one thread-local protected WAL connection with lifetime pins.
+
+        Every _connect still revalidates policy and commits/rolls back its own
+        operation. Never share across threads, nest operations, migrate inside
+        a scope, or use this as a hostile-process isolation boundary. SQLite
+        and its native pins close together on every exit, including exceptions.
+        The default per-operation connection behavior is unchanged.
+        """
+        if self.storage_policy is None:
+            raise ValueError("connection scope requires protected storage")
+        if getattr(self._connection_local, "entry", None) is not None:
+            raise RuntimeError("nested connection scopes are not supported")
+        with self._connect() as db:
+            self._connection_local.entry = {"db": db, "path": self.path,
+                                            "policy": self.storage_policy, "in_use": False}
+            try:
+                yield
+                entry = self._connection_local.entry
+                if entry["in_use"] or db.in_transaction:
+                    raise RuntimeError("unfinished Store operation at connection scope exit")
+            finally:
+                self._connection_local.entry = None
 
     @contextmanager
     def _open_connection(self, *, set_wal: bool):

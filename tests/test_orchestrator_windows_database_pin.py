@@ -373,11 +373,15 @@ def test_protected_startup_recovers_legacy_delete_hot_journal():
         workspace.blobs.mkdir()
         policy = PrivateStoragePolicy.open(workspace.root.name)
         database = policy.context.database
+        # Sixty-four rows touch more pages than the child's five-page cache,
+        # creating a real hot rollback journal while keeping the crash probe
+        # reliable on slower Windows CI runners.
+        hot_journal_rows = 64
         with closing(sqlite3.connect(database)) as seeded:
             seeded.execute("CREATE TABLE payloads(id INTEGER PRIMARY KEY, payload BLOB NOT NULL)")
             seeded.executemany(
                 "INSERT INTO payloads(payload) VALUES (zeroblob(1200))",
-                [()] * 6000,
+                [()] * hot_journal_rows,
             )
             seeded.commit()
         program = r"""
@@ -402,7 +406,7 @@ os._exit(23)
         with closing(sqlite3.connect(database)) as recovered:
             assert recovered.execute(
                 "SELECT sum(length(payload)) FROM payloads"
-            ).fetchone()[0] == 6000 * 1200
+            ).fetchone()[0] == hot_journal_rows * 1200
             assert recovered.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
             assert recovered.execute("PRAGMA foreign_key_check").fetchone() is None
         assert not journal.exists() or not journal.read_bytes().startswith(

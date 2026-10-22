@@ -42,6 +42,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Reopen existing ACL-verified Windows workspace by label; cannot combine with --db")
     commands = p.add_subparsers(dest="command", required=True)
     commands.add_parser("capabilities", help="Display supported operations and safety boundaries")
+    s = commands.add_parser("demo", help="Fixed five-worker offline sandbox; no production finalization")
+    s.add_argument("--label", required=True)
+    s.add_argument("--action", choices=("init", "run", "status", "doctor"), required=True)
+    s.add_argument("--crash-after-intent", action="store_true",
+                   help="Exit this synthetic demo process with code 17 after its first mock intent")
     s = commands.add_parser("init-private-workspace",
                             help="Opt-in NEW Windows ACL-protected local SQLite/blob directory")
     s.add_argument("--label", required=True, help="New workspace name; existing paths are refused")
@@ -113,7 +118,7 @@ def _capabilities() -> dict:
         "task_store": "sqlite-wal", "max_worker_slots": 5,
         "private_workspace_cli": "explicit-windows-label-with-dacl-readback",
         "legacy_db_paths_private_assurance": False,
-        "commands": ["capabilities", "init-private-workspace", "backup-local-db",
+        "commands": ["capabilities", "demo", "init-private-workspace", "backup-local-db",
                      "staging-audit",
                      "status", "list-tasks", "task", "events",
                      "create-task", "register-resource", "resolve-resource", "list-resources",
@@ -133,6 +138,8 @@ def _capabilities() -> dict:
         "durable_dispatch_outbox": "available-to-internal-code-not-external-transport",
         "durable_event_cursor": True,
         "review_gate": "verified-state-requires-explicit-finalization",
+        "offline_mvp": "fixed-five-worker-synthetic-DAG",
+        "production_finalizer_enabled": False,
     }
 
 
@@ -144,6 +151,12 @@ def _public_task(row: dict | None) -> dict | None:
 
 
 def execute(args: argparse.Namespace) -> dict:
+    if args.command == "demo":
+        if args.db or args.private_workspace is not None:
+            raise ValueError("demo cannot combine with --db, DB environment or --private-workspace")
+        from .offline_demo import execute_demo
+        return execute_demo(action=args.action, label=args.label,
+                            crash_after_intent=args.crash_after_intent)
     if args.command == "observe-capabilities":
         return execute_observer_command(args, None)
     if args.command == "worker-capabilities":
@@ -310,7 +323,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"ok": True, "data": result}, ensure_ascii=False, sort_keys=True))
     else:
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
-    return 0
+    return result["exit_code"] if args.command == "demo" else 0
 
 
 if __name__ == "__main__":
