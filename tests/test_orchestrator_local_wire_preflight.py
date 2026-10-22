@@ -27,11 +27,19 @@ def ready(tmp_path):
         "thread.json": {"type": "object", "required": ["model", "approvalPolicy", "sandbox"],
                         "properties": {"approvalPolicy": {"const": "never"},
                                        "sandbox": {"const": "read-only"}}},
-        "thread_result.json": {"type": "object"},
+        "thread_result.json": {
+            "type": "object", "required": ["thread"],
+            "properties": {"thread": {"type": "object"}},
+        },
         "turn.json": {"type": "object", "required": ["threadId", "input", "sandboxPolicy"],
-                      "properties": {"sandboxPolicy": {"type": "object", "properties": {
-                          "type": {"const": "readOnly"}}}}},
-        "turn_result.json": {"type": "object"},
+                      "properties": {"threadId": {"type": "string"},
+                                     "input": {"type": "array"},
+                                     "sandboxPolicy": {"type": "object", "properties": {
+                                         "type": {"const": "readOnly"}}}}},
+        "turn_result.json": {
+            "type": "object", "required": ["turn"],
+            "properties": {"turn": {"type": "object"}},
+        },
     }
     manifest = []
     for name, spec in specifications.items():

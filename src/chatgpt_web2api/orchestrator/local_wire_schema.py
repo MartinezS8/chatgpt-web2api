@@ -18,6 +18,22 @@ _PHASES = (
     "thread_params", "thread_result", "turn_params", "turn_result",
 )
 
+# Wrongly selected permissive JSON schemas can otherwise report a fake PASS.
+# These are intentionally malformed instances of each *concrete* RPC shape.
+# A useful method-specific schema must reject its corresponding probe.
+_BAD_SHAPES = {
+    "thread_params": {
+        "model": "synthetic", "cwd": "C:/scratch",
+        "sandbox": 123, "approvalPolicy": "never",
+    },
+    "thread_result": {"thread": 123},
+    "turn_params": {
+        "threadId": 123, "input": "not-an-array",
+        "sandboxPolicy": {"type": "readOnly"},
+    },
+    "turn_result": {"turn": 123},
+}
+
 
 class LocalWireSchemas:
     """Four explicit schema selectors; never guess names across Codex versions."""
@@ -48,7 +64,18 @@ class LocalWireSchemas:
             document = documents[name]
             validator_class = validators.validator_for(document)
             validator_class.check_schema(document)
-            self._validators[phase] = validator_class(document, registry=registry)
+            validator = validator_class(document, registry=registry)
+            try:
+                accepts_broken = validator.is_valid(_BAD_SHAPES[phase])
+            except Exception as exc:
+                raise ValueError(
+                    f"selected {phase} schema has unresolved local references"
+                ) from exc
+            if accepts_broken:
+                raise ValueError(
+                    f"selected {phase} schema accepts malformed RPC shape"
+                )
+            self._validators[phase] = validator
         self.selections = names
         self.codex_version = report["codex_version"]
 

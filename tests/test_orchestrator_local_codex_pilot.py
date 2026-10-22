@@ -52,9 +52,11 @@ def context(tmp_path, monkeypatch):
         },
         "TurnStartParams.json": {
             "type": "object", "required": ["threadId", "input"],
+            "properties": {"threadId": {"type": "string"}, "input": {"type": "array"}},
         },
         "TurnStartResponse.json": {
             "type": "object", "required": ["turn"],
+            "properties": {"turn": {"type": "object"}},
         },
     }
     manifest = []
