@@ -121,3 +121,24 @@ separater Minimal-Pilot, nicht das abschließende Orchestrator-System.
 - Beim ersten Live-Test: eine oder null `turn/start`-Requests, Ergebnisstatus,
   Thread-/Turn-Korrelation, `intent.json`, `result.json`/`quarantine.json`
 - Beobachtete Probleme und folgende Implementierungsaufgaben für 2/5 Worker
+
+
+## Ergänzung: PR #64 — Schema-Fence vor dem Live-Test
+
+Der Pilot hat jetzt vier **Pflichtargumente** für exakt ausgewählte und zur
+lokalen Codex-Version passende Schema-Dateien:
+
+```powershell
+--thread-params-schema "<THREAD_PARAMS_SCHEMA.json>" `
+--thread-result-schema "<THREAD_RESULT_SCHEMA.json>" `
+--turn-params-schema "<TURN_PARAMS_SCHEMA.json>" `
+--turn-result-schema "<TURN_RESULT_SCHEMA.json>"
+```
+
+Codex muss diese vier relativen Dateinamen **aus dem realen Schema-Manifest**
+ermitteln, die jeweils erwartete Struktur überprüfen und an den obigen
+`pilot_one_codex_turn.py`-Aufruf anhängen. Test-Filenames sind NICHT die
+wirklichen Pfade der installierten Codex-Version. Ungeprüfte oder fehlende
+Pfade brechen vor dem Live-Send ab. Unpassende `thread/start`-Antworten
+verhindern den anschließenden `turn/start`. Der Test bleibt ausdrücklich
+ein einzelner bewusst gestarteter Hobby-Pilot.

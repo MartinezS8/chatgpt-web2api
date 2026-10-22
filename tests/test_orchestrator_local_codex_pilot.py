@@ -1,6 +1,7 @@
 """The manual pilot emits one synthetic turn at most and never auto-retries."""
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 
@@ -38,6 +39,37 @@ def context(tmp_path, monkeypatch):
     exe.write_text("mock exe never run", encoding="utf-8")
     root = tmp_path / "schema"
     root.mkdir()
+    schemas = {
+        "ThreadStartParams.json": {
+            "type": "object", "required": ["model", "sandbox"],
+            "properties": {"sandbox": {"const": "read-only"}},
+        },
+        "ThreadStartResponse.json": {
+            "type": "object", "required": ["thread"],
+            "properties": {"thread": {
+                "type": "object", "required": ["id", "source"],
+                "properties": {"source": {"const": "synthetic"}}}},
+        },
+        "TurnStartParams.json": {
+            "type": "object", "required": ["threadId", "input"],
+        },
+        "TurnStartResponse.json": {
+            "type": "object", "required": ["turn"],
+        },
+    }
+    manifest = []
+    for name, value in schemas.items():
+        path = root / name
+        path.write_text(json.dumps(value), encoding="utf-8")
+        manifest.append({
+            "path": name, "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        })
+    (root / "offline-readiness.json").write_text(json.dumps({
+        "codex_version": "codex-cli fixture",
+        "codex_binary_sha256": "a" * 64,
+        "installed_schema_inspected": True,
+        "generated_json_schema": manifest,
+    }), encoding="utf-8")
     cwd = tmp_path / "scratch"
     cwd.mkdir()
     receipt = tmp_path / "first-attempt"
@@ -55,7 +87,12 @@ def _run(ctx, **kwargs):
     exe, root, cwd, prompt, receipt = ctx
     return pilot.run_one_local_pilot(
         exe, root, cwd, prompt, receipt, model="available",
-        effort="medium", **kwargs,
+        effort="medium", schema_selectors={
+            "thread_params": "ThreadStartParams.json",
+            "thread_result": "ThreadStartResponse.json",
+            "turn_params": "TurnStartParams.json",
+            "turn_result": "TurnStartResponse.json",
+        }, **kwargs,
     )
 
 
@@ -63,7 +100,8 @@ def _success_frames():
     return [
         {"id": 1, "result": {"userAgent": "codex fixture"}},
         {"method": "thread/started", "params": {"thread": {"id": "thread-x"}}},
-        {"id": 2, "result": {"thread": {"id": "thread-x", "sessionId": "thread-x"}}},
+        {"id": 2, "result": {"thread": {
+            "id": "thread-x", "sessionId": "thread-x", "source": "synthetic"}}},
         {"method": "turn/started", "params": {
             "threadId": "thread-x", "turnId": "turn-x",
             "turn": {"id": "turn-x", "status": "inProgress"}}},
@@ -136,3 +174,64 @@ def test_wire_rejects_second_turn_even_after_ack():
     with pytest.raises(PermissionError, match="second"):
         wire._send("turn/start", {"threadId": "x"}, request_id=4)
     assert len(process.stdin.getvalue().splitlines()) == 1
+
+
+def test_schema_mismatch_in_thread_result_prevents_turn_start(context, monkeypatch):
+    frames = _success_frames()
+    frames[2]["result"]["thread"]["source"] = "old-0.157"
+    proc = _FakeProcess(frames)
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: proc)
+    with pytest.raises(ValueError, match="thread_result"):
+        _run(context, allow_one_turn=True)
+    outgoing = [json.loads(line) for line in proc.stdin.getvalue().splitlines()]
+    assert [item["method"] for item in outgoing] == [
+        "initialize", "initialized", "thread/start",
+    ]
+    assert (context[-1] / "quarantine.json").exists()
+
+
+def test_schema_mismatch_in_turn_params_prevents_turn_start(context, monkeypatch):
+    root = context[1]
+    schema = root / "TurnStartParams.json"
+    schema.write_text(json.dumps({
+        "type": "object", "required": ["threadId", "input", "mustNotBeOmitted"],
+    }), encoding="utf-8")
+    receipt = root / "offline-readiness.json"
+    manifest = json.loads(receipt.read_text(encoding="utf-8"))
+    for entry in manifest["generated_json_schema"]:
+        if entry["path"] == schema.name:
+            entry["sha256"] = hashlib.sha256(schema.read_bytes()).hexdigest()
+    receipt.write_text(json.dumps(manifest), encoding="utf-8")
+    proc = _FakeProcess(_success_frames())
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: proc)
+    with pytest.raises(ValueError, match="turn_params"):
+        _run(context, allow_one_turn=True)
+    outgoing = [json.loads(line) for line in proc.stdin.getvalue().splitlines()]
+    assert [item["method"] for item in outgoing] == [
+        "initialize", "initialized", "thread/start",
+    ]
+    assert (context[-1] / "quarantine.json").exists()
+
+
+def test_missing_wire_schema_selector_rejects_before_process_and_account(context, monkeypatch):
+    exe, root, cwd, prompt, folder = context
+    monkeypatch.setattr(pilot, "discover_local_codex", lambda *a, **kw: pytest.fail(
+        "account read must not occur before schema selection"))
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: pytest.fail(
+        "must not spawn app-server before schema validation"))
+    with pytest.raises(ValueError, match="selectors"):
+        pilot.run_one_local_pilot(
+            exe, root, cwd, prompt, folder, model="available", effort="medium",
+            allow_one_turn=True,
+        )
+    assert not folder.exists()
+
+
+def test_schema_tampering_rejects_before_account_access(context, monkeypatch):
+    schema = context[1] / "ThreadStartResponse.json"
+    schema.write_text('{"type":"null"}', encoding="utf-8")
+    monkeypatch.setattr(pilot, "discover_local_codex", lambda *a, **kw: pytest.fail(
+        "account discovery after corrupted schema"))
+    with pytest.raises(ValueError, match="checksum"):
+        _run(context, allow_one_turn=True)
+    assert not context[-1].exists()

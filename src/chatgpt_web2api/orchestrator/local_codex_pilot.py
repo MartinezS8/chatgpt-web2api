@@ -17,6 +17,7 @@ from pathlib import Path
 
 from .local_codex_discovery import _pairs_no_duplicates, discover_local_codex
 from .local_pilot_doctor import local_pilot_doctor
+from .local_wire_schema import LocalWireSchemas
 
 _FRAME_MAX = 64 * 1024
 _EOF = object()
@@ -202,7 +203,8 @@ def _stop(proc):
 def run_one_local_pilot(
     executable: str | Path, schema_root: str | Path, cwd: str | Path,
     prompt_file: str | Path, receipt_dir: str | Path, *,
-    model: str, effort: str, allow_one_turn: bool = False, timeout: int = 90,
+    model: str, effort: str, schema_selectors: dict[str, str] | None = None,
+    allow_one_turn: bool = False, timeout: int = 90,
 ) -> dict:
     """Run ONE explicitly allowed local turn; no retry, even on lost ACK."""
     if allow_one_turn is not True:
@@ -217,8 +219,13 @@ def run_one_local_pilot(
     prompt = prompt_path.read_text(encoding="utf-8").strip()
     if not 1 <= len(prompt) <= 2000:
         raise ValueError("prompt must be non-empty, at most 2000 characters")
+    # Do not run account discovery until the four chosen wire schemas are
+    # present and pinned. Missing selectors are a hard error, not a fallback.
+    wire_schemas = LocalWireSchemas(schema_root, selections=schema_selectors)
     # The doctor verifies binary SHA/version and schema; no provider action.
     doctor = local_pilot_doctor(executable, schema_root, root)
+    if wire_schemas.codex_version != doctor["codex_version"]:
+        raise ValueError("pilot wire schema version differs from pinned executable")
     # An explicit live-turn opt-in also allows account/model discovery.
     offered = discover_local_codex(
         executable, schema_root, root, allow_account_discovery=True,
@@ -248,21 +255,27 @@ def run_one_local_pilot(
         if not isinstance(hello.get("userAgent"), str):
             raise RuntimeError("app-server initialize result invalid")
         wire.initialized()
-        thread_response = wire.rpc(2, "thread/start", {
+        thread_params = {
             "model": model, "cwd": str(root),
             "approvalPolicy": "never", "sandbox": "read-only",
             "serviceName": "w2a_local_one_turn",
-        })
+        }
+        wire_schemas.require("thread_params", thread_params)
+        thread_response = wire.rpc(2, "thread/start", thread_params)
+        wire_schemas.require("thread_result", thread_response)
         thread = thread_response.get("thread")
         if not isinstance(thread, dict) or not isinstance(thread.get("id"), str):
             raise RuntimeError("thread/start did not return a thread id")
         thread_id = thread["id"]
-        response = wire.rpc(3, "turn/start", {
+        turn_params = {
             "threadId": thread_id,
             "input": [{"type": "text", "text": prompt}],
             "model": model, "effort": effort, "cwd": str(root),
             "approvalPolicy": "never", "sandboxPolicy": {"type": "readOnly"},
-        })
+        }
+        wire_schemas.require("turn_params", turn_params)
+        response = wire.rpc(3, "turn/start", turn_params)
+        wire_schemas.require("turn_result", response)
         turn = response.get("turn")
         if not isinstance(turn, dict) or not isinstance(turn.get("id"), str):
             raise RuntimeError("turn/start acknowledgement lacks turn id")
