@@ -14,6 +14,9 @@ from pathlib import Path
 
 from .storage_hardening import reject_reparse_path
 
+_MAX_SCHEMA_FILES = 1024
+_MAX_SCHEMA_TOTAL_BYTES = 64 * 1024 * 1024
+
 
 def _file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -65,14 +68,23 @@ def inspect_codex_schema(
         [str(exe), "app-server", "generate-json-schema", "--out", str(target)],
         capture_output=True, text=True, check=True, timeout=120,
     )
-    schema_files = sorted(target.rglob("*.json"))
-    if not 1 <= len(schema_files) <= 300:
+    schema_files = []
+    for file in target.rglob("*.json"):
+        if len(schema_files) >= _MAX_SCHEMA_FILES:
+            raise ValueError("Codex schema output missing or unexpectedly large")
+        schema_files.append(file)
+    if not schema_files:
         raise ValueError("Codex schema output missing or unexpectedly large")
+    schema_files.sort()
     manifest = []
+    total_bytes = 0
     for file in schema_files:
         reject_reparse_path(file, error_message="generated schema traverses reparse point")
         if not file.is_file() or file.stat().st_size > 25_000_000:
             raise ValueError("invalid generated Codex schema file")
+        total_bytes += file.stat().st_size
+        if total_bytes > _MAX_SCHEMA_TOTAL_BYTES:
+            raise ValueError("generated Codex schema total size exceeds limit")
         with file.open("r", encoding="utf-8") as stream:
             parsed = json.load(stream)
         if type(parsed) is not dict:

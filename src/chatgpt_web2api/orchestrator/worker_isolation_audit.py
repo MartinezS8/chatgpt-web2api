@@ -134,7 +134,10 @@ def probe_disposable_root(root_value: str | Path, *, expected_controller_sid: st
     moved = root / ("probe-renamed-" + uuid.uuid4().hex + ".tmp")
 
     def append_marker():
-        with append_target.open("ab") as f:
+        # Do not create a missing marker: that is an inconclusive probe setup,
+        # not evidence that append access to the prepared object was allowed.
+        descriptor = os.open(append_target, os.O_WRONLY | os.O_APPEND | os.O_BINARY)
+        with os.fdopen(descriptor, "ab") as f:
             f.write(b"x")
 
     def create_scratch():
