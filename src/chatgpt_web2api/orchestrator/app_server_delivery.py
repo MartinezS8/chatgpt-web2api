@@ -700,6 +700,12 @@ class AppServerDeliveryLedger:
                 "finalization_permitted": False,
             }
 
+    def triage(self, attempt_id: str) -> dict[str, Any]:
+        """Only read and classify an attempt; never authenticate or authorize."""
+        from .operator_triage import assess_delivery_case
+
+        return assess_delivery_case(self.reconcile(attempt_id))
+
     def record_operator_disposition(self, attempt_id: str, *, operator_ref: str,
                                     disposition: str, reason_code: str) -> bool:
         """Append one audit annotation; this cannot release or retry an attempt.
