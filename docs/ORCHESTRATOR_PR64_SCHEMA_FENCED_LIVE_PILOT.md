@@ -39,3 +39,19 @@ Use `py -3.12 scripts/audit_codex_schema_fixture.py --schema-root "..." --list` 
 **Risk level:** local hobby use is supported, but running under the same
 Windows user is not a hard OS sandbox. No system users or productive ACLs
 are changed; no automatic merge, retry, plugin, or multi-worker functionality.
+
+### Follow-up PR #67 — Reject non-discriminating schema selections
+
+The schema selector additionally probes each selected document using a
+deliberately malformed method-specific payload (e.g. a numeric thread or
+turn object, a non-array turn input, or a numeric sandbox value).
+A schema that accepts these wrong shapes is too permissive for a meaningful
+PASS and is rejected **before** a real app-server is launched or any account
+query happens. This does NOT establish that the schema's filename maps to the
+correct actual Codex RPC: Codex must still visually review the four generated
+schema selections and run the offline preflight.
+
+The negative probes are deliberately conservative for existing generated
+Codex JSON schema structures. If the real installed version rejects a
+selected schema in this step, inspect why it accepted a broken sample before
+changing these tests. Do not simply disable the probe to make the smoke green.

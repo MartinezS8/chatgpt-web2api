@@ -81,6 +81,20 @@ def test_wrong_selector_duplicate_or_tampering_is_blocked(local_bundle):
         LocalWireSchemas(local_bundle, selections=PHASES)
 
 
+@pytest.mark.parametrize("phase", list(PHASES))
+def test_schema_that_accepts_malformed_rpc_is_not_accepted(local_bundle, phase):
+    schema_file = local_bundle / PHASES[phase]
+    schema_file.write_text(json.dumps({"type": "object"}), encoding="utf-8")
+    manifest_file = local_bundle / "offline-readiness.json"
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    for entry in manifest["generated_json_schema"]:
+        if entry["path"] == schema_file.name:
+            entry["sha256"] = hashlib.sha256(schema_file.read_bytes()).hexdigest()
+    manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match=phase + " schema accepts malformed"):
+        LocalWireSchemas(local_bundle, selections=PHASES)
+
+
 def test_cannot_validate_wrong_phase_or_non_object(local_bundle):
     v = LocalWireSchemas(local_bundle, selections=PHASES)
     with pytest.raises(ValueError, match="invalid"):
