@@ -20,10 +20,15 @@ Windows 11, CPython 3.12.10; all account-backed E2E tests remain disabled.
 
 ## Local evidence
 
-The 18 focused schema/isolation tests passed, and Ruff passed. The corrected
+The 21 focused schema/isolation tests passed, and Ruff passed. The corrected
 native schema diagnostic succeeded with an explicit absolute executable path
 and exact expected version. Receipt and schemas remain outside the repository
 under LOCALAPPDATA/w2a-validation-phase58/schema-fixed-20261022.
+Independent read-only review identified eager path collection before checking
+the count cap. Enumeration now stops at the first excessive JSON path before
+sorting. Tests additionally cover exactly 1024 files, early enumeration stop
+and cumulative overflow across two files. The intermediate strict run on
+e515c38 was deliberately stopped to incorporate this change, not counted as PASS.
 Only `--version` and `app-server generate-json-schema` were executed. No
 authentication, model/list, thread/start, turn/start or provider operation ran.
 The executable version is an alpha version: schema generation is not proof of

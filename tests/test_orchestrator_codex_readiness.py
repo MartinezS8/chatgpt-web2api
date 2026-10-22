@@ -111,7 +111,7 @@ def test_subprocess_failure_is_not_silently_ignored(setup_codex, monkeypatch):
     assert not target.exists()
 
 
-@pytest.mark.parametrize("count", [318, 1025])
+@pytest.mark.parametrize("count", [318, 1024, 1025])
 def test_schema_bundle_count_is_bounded_without_rejecting_installed_cli(
     setup_codex, monkeypatch, count,
 ):
@@ -125,7 +125,7 @@ def test_schema_bundle_count_is_bounded_without_rejecting_installed_cli(
         return subprocess.CompletedProcess(argv, 0, stdout="")
 
     monkeypatch.setattr(readiness.subprocess, "run", generate)
-    if count == 318:
+    if count <= 1024:
         report = readiness.inspect_codex_schema(exe, target)
         assert len(report["generated_json_schema"]) == count
         assert report["live_provider_authorized"] is False
@@ -138,6 +138,38 @@ def test_schema_bundle_count_is_bounded_without_rejecting_installed_cli(
 def test_schema_bundle_total_bytes_are_bounded(setup_codex, monkeypatch):
     exe, target, _ = setup_codex
     monkeypatch.setattr(readiness, "_MAX_SCHEMA_TOTAL_BYTES", 8)
+    with pytest.raises(ValueError, match="total size"):
+        readiness.inspect_codex_schema(exe, target)
+    assert not (target / "offline-readiness.json").exists()
+
+
+def test_schema_count_stops_consuming_paths_at_limit(setup_codex, monkeypatch):
+    exe, target, _ = setup_codex
+    monkeypatch.setattr(readiness, "_MAX_SCHEMA_FILES", 1)
+
+    def paths(root, pattern):
+        yield target / "first.json"
+        yield target / "second.json"
+        raise AssertionError("enumeration continued after the count limit")
+
+    monkeypatch.setattr(type(target), "rglob", paths)
+    with pytest.raises(ValueError, match="unexpectedly large"):
+        readiness.inspect_codex_schema(exe, target)
+    assert not (target / "offline-readiness.json").exists()
+
+
+def test_schema_total_limit_accumulates_across_files(setup_codex, monkeypatch):
+    exe, target, _ = setup_codex
+
+    def generate(argv, **kwargs):
+        if argv[-1] == "--version":
+            return subprocess.CompletedProcess(argv, 0, stdout="codex-cli 0.test.1\n")
+        for index in range(2):
+            (target / f"schema-{index}.json").write_text('{"type":"object"}', encoding="utf-8")
+        return subprocess.CompletedProcess(argv, 0, stdout="")
+
+    monkeypatch.setattr(readiness.subprocess, "run", generate)
+    monkeypatch.setattr(readiness, "_MAX_SCHEMA_TOTAL_BYTES", 24)
     with pytest.raises(ValueError, match="total size"):
         readiness.inspect_codex_schema(exe, target)
     assert not (target / "offline-readiness.json").exists()

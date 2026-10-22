@@ -68,9 +68,14 @@ def inspect_codex_schema(
         [str(exe), "app-server", "generate-json-schema", "--out", str(target)],
         capture_output=True, text=True, check=True, timeout=120,
     )
-    schema_files = sorted(target.rglob("*.json"))
-    if not 1 <= len(schema_files) <= _MAX_SCHEMA_FILES:
+    schema_files = []
+    for file in target.rglob("*.json"):
+        if len(schema_files) >= _MAX_SCHEMA_FILES:
+            raise ValueError("Codex schema output missing or unexpectedly large")
+        schema_files.append(file)
+    if not schema_files:
         raise ValueError("Codex schema output missing or unexpectedly large")
+    schema_files.sort()
     manifest = []
     total_bytes = 0
     for file in schema_files:
