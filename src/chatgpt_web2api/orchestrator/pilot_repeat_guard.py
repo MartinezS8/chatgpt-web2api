@@ -7,6 +7,7 @@ Only called after --allow-one-turn. Conservative policy: no auto-replay.
 from __future__ import annotations
 
 import hashlib
+from contextlib import closing
 import json
 import os
 import sqlite3
@@ -42,7 +43,7 @@ def reserve_local_pilot_once(
         "prompt_sha256": prompt_sha256,
         "codex_binary_sha256": codex_binary_sha256,
     }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-    with sqlite3.connect(database, timeout=30, isolation_level=None) as conn:
+    with closing(sqlite3.connect(database, timeout=30, isolation_level=None)) as conn:
         conn.execute("BEGIN IMMEDIATE")
         conn.execute("""CREATE TABLE IF NOT EXISTS pilot_one_turn_reservations(
             fingerprint TEXT PRIMARY KEY,
