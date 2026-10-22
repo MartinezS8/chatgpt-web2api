@@ -88,7 +88,10 @@ def context(tmp_path, monkeypatch):
     })
     monkeypatch.setattr(pilot, "discover_local_codex", lambda *a, **kw: {
         "account_present": True,
-        "models": [{"id": "available", "supported_efforts": ["medium"]}],
+        "account_mode": "chatgpt",
+        "models": [{"id": "available", "supported_efforts": ["medium"],
+                    "model_slug": "available", "supports_text": True,
+                    "hidden": False}],
     })
     return exe, root, cwd, prompt, receipt
 
@@ -402,3 +405,44 @@ def test_keyboard_interrupt_before_send_records_pre_turn(context, monkeypatch):
         _run(context, allow_one_turn=True)
     record = json.loads((context[-1] / "quarantine.json").read_text("utf-8"))
     assert record["turn_start_may_have_been_sent"] is False
+
+
+def test_api_key_account_not_silently_billed(context, monkeypatch):
+    monkeypatch.setattr(pilot, "discover_local_codex", lambda *a, **kw: {
+        "account_present": True, "account_mode": "api_key",
+        "models": [{"id": "available", "supported_efforts": ["medium"]}],
+    })
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: pytest.fail(
+        "provider process must not spawn under API key auth"))
+    with pytest.raises(PermissionError, match="API-key billing"):
+        _run(context, allow_one_turn=True)
+    assert not context[-1].exists()
+
+
+def test_model_slug_is_sent_not_picker_id(context, monkeypatch):
+    monkeypatch.setattr(pilot, "discover_local_codex", lambda *a, **kw: {
+        "account_present": True, "account_mode": "chatgpt",
+        "models": [{"id": "available", "model_slug": "actual-slug",
+                    "supported_efforts": ["medium"], "supports_text": True}],
+    })
+    frames = _success_frames()
+    frames[2]["result"]["model"] = "actual-slug"
+    proc = _FakeProcess(frames)
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: proc)
+    result = _run(context, allow_one_turn=True)
+    outgoing = [json.loads(l) for l in proc.stdin.getvalue().splitlines()]
+    thread = next(x for x in outgoing if x["method"] == "thread/start")
+    turn = next(x for x in outgoing if x["method"] == "turn/start")
+    assert thread["params"]["model"] == "actual-slug"
+    assert turn["params"]["model"] == "actual-slug"
+    assert result["effective_model_slug"] == "actual-slug"
+
+
+def test_text_incompatible_model_is_rejected(context, monkeypatch):
+    monkeypatch.setattr(pilot, "discover_local_codex", lambda *a, **kw: {
+        "account_present": True, "account_mode": "chatgpt",
+        "models": [{"id": "available", "supported_efforts": ["medium"],
+                    "supports_text": False}],
+    })
+    with pytest.raises(ValueError, match="does not support text"):
+        _run(context, allow_one_turn=True)
