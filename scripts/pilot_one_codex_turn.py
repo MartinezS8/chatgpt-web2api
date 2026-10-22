@@ -39,7 +39,10 @@ def main() -> int:
         allow_one_turn=args.allow_one_turn, timeout=args.timeout,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
-    return 0
+    return 0 if (
+        result["turn_terminal_status"] == "completed"
+        and result["assistant_output_matches_expected"] is True
+    ) else 2
 
 
 if __name__ == "__main__":

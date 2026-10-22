@@ -16,7 +16,7 @@ def main() -> int:
     args = parser.parse_args()
     report = inspect_local_pilot_receipt(args.receipt_dir)
     print(json.dumps(report, indent=2, sort_keys=True))
-    return 0 if report["classification"] == "TERMINAL_UNREVIEWED" else 2
+    return 0 if report["classification"] == "TERMINAL_OUTPUT_MATCHED_UNREVIEWED" else 2
 
 
 if __name__ == "__main__":

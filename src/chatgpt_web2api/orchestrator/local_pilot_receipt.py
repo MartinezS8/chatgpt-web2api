@@ -81,10 +81,17 @@ def inspect_local_pilot_receipt(folder_value: str | Path) -> dict:
                 and bool(result["thread_id"])
                 and isinstance(result.get("turn_id"), str)
                 and bool(result["turn_id"])):
-            status = ("TERMINAL_UNREVIEWED" if terminal == "completed"
-                      else "TERMINAL_FAILED_OR_INTERRUPTED")
+            if terminal != "completed":
+                status = "TERMINAL_FAILED_OR_INTERRUPTED"
+            elif (result.get("assistant_output_matches_expected") is True
+                  and result.get("assistant_message_observed") is True):
+                status = "TERMINAL_OUTPUT_MATCHED_UNREVIEWED"
+            elif result.get("assistant_output_matches_expected") is False:
+                status = "TERMINAL_OUTPUT_MISMATCH_OR_MISSING"
+            else:
+                status = "LEGACY_TERMINAL_OUTPUT_UNCHECKED"
             turn_attempted = True
-            detail = "terminal transport receipt; model output not independently verified"
+            detail = "terminal transport; assistant output not independently proven"
         else:
             detail = "terminal result has conflicting or incomplete fields"
     elif quarantine is not None:
