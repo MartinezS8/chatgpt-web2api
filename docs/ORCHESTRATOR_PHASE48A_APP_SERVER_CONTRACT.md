@@ -27,15 +27,14 @@ Server versions may evolve. This is only a preliminary schema/sequence contract;
 do not claim compatibility with the user's installed Codex binary without generating
 and comparing that version's \`codex app-server generate-json-schema\` output.
 
-## Mandatory next development
+## Follow-up gates
 
-1. **Codex Sol 6.1 must implement a bounded local fake JSONL server** and validate
-   notifications arriving before their corresponding response (e.g. \`turn/started\`);
-   these are NOT yet covered by this simple sequential transcript checker.
-2. Add durable \`worker_session\` / \`turn_id\` / \`request_id\` / idempotency and
-   sent/unknown-delivery records in SQLite *before* any future authorized send.
-   Do not reconstruct a send permit on restart. Unknown dispatch means pause and
-   explicit reconciliation, never blind resend.
+1. Phase 48b adds a bounded synthetic JSONL subprocess harness and adversarial
+   transcripts; it still has no Codex process or provider connection.
+2. Phase 48c must add durable \`worker_session\` / \`turn_id\` / \`request_id\` /
+   idempotency and sent/unknown-delivery records in SQLite *before* any future
+   authorized send. Do not reconstruct a send permit on restart. Unknown delivery
+   means pause and explicit reconciliation, never blind resend.
 3. Implement explicit sandbox, Windows worker account isolation, one allowed Git
    worktree and a process allowlist. A subprocess with the same user/token is not
    protected from controller secrets by path prechecks alone.
