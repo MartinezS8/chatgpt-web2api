@@ -99,6 +99,31 @@ def verified_bundle(root_value: str | Path) -> tuple[dict, dict[str, dict]]:
     return receipt, seen
 
 
+
+def build_local_schema_registry(
+    root: Path, documents: dict[str, dict],
+) -> tuple[Registry, dict[str, dict]]:
+    """Bind un-identified schema documents to their original LOCAL file URIs.
+
+    A generated JSON file without $id needs its own file URI to resolve
+    relative references. Register only manifest-verified resources; never
+    fetch arbitrary HTTP(S) resources or files outside the capture.
+    """
+    resources = []
+    bound = {}
+    for relative, document in documents.items():
+        path_uri = (root / relative).as_uri()
+        schema = dict(document)
+        schema.setdefault("$id", path_uri)
+        resource = Resource.from_contents(schema, default_specification=DRAFT202012)
+        resources.append((path_uri, resource))
+        schema_id = document.get("$id")
+        if isinstance(schema_id, str) and schema_id:
+            resources.append((schema_id, resource))
+        bound[relative] = schema
+    return Registry().with_resources(resources), bound
+
+
 def audit_fixture(
     root_value: str | Path, schema_name: str, fixture_file: str | Path,
 ) -> dict:
@@ -110,15 +135,8 @@ def audit_fixture(
     fixture_path = Path(fixture_file).expanduser()
     instance = _read_json(fixture_path, size_limit=1024 * 1024)
     root = Path(root_value).expanduser().resolve()
-    resources = []
-    for relative, document in schemas.items():
-        resource = Resource.from_contents(document, default_specification=DRAFT202012)
-        resources.append(((root / relative).as_uri(), resource))
-        schema_id = document.get("$id")
-        if isinstance(schema_id, str) and schema_id:
-            resources.append((schema_id, resource))
-    registry = Registry().with_resources(resources)
-    schema = schemas[name]
+    registry, bound = build_local_schema_registry(root, schemas)
+    schema = bound[name]
     validator_type = validators.validator_for(schema)
     validator_type.check_schema(schema)
     # Registry provides only captured, in-memory resources. No remote URI fetch.
