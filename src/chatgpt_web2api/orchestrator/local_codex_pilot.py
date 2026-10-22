@@ -17,6 +17,7 @@ from pathlib import Path
 
 from .local_codex_discovery import _pairs_no_duplicates, discover_local_codex
 from .local_pilot_doctor import local_pilot_doctor
+from .local_pilot_messages import thread_start_params, turn_start_params
 from .local_wire_schema import LocalWireSchemas
 
 _FRAME_MAX = 64 * 1024
@@ -255,11 +256,7 @@ def run_one_local_pilot(
         if not isinstance(hello.get("userAgent"), str):
             raise RuntimeError("app-server initialize result invalid")
         wire.initialized()
-        thread_params = {
-            "model": model, "cwd": str(root),
-            "approvalPolicy": "never", "sandbox": "read-only",
-            "serviceName": "w2a_local_one_turn",
-        }
+        thread_params = thread_start_params(model=model, cwd=str(root))
         wire_schemas.require("thread_params", thread_params)
         thread_response = wire.rpc(2, "thread/start", thread_params)
         wire_schemas.require("thread_result", thread_response)
@@ -267,12 +264,9 @@ def run_one_local_pilot(
         if not isinstance(thread, dict) or not isinstance(thread.get("id"), str):
             raise RuntimeError("thread/start did not return a thread id")
         thread_id = thread["id"]
-        turn_params = {
-            "threadId": thread_id,
-            "input": [{"type": "text", "text": prompt}],
-            "model": model, "effort": effort, "cwd": str(root),
-            "approvalPolicy": "never", "sandboxPolicy": {"type": "readOnly"},
-        }
+        turn_params = turn_start_params(
+            thread_id=thread_id, prompt=prompt, model=model, effort=effort, cwd=str(root),
+        )
         wire_schemas.require("turn_params", turn_params)
         response = wire.rpc(3, "turn/start", turn_params)
         wire_schemas.require("turn_result", response)
