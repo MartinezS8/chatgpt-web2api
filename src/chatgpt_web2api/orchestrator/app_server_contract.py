@@ -34,6 +34,7 @@ class OfflineAppServerContract:
     turn_id: str | None = field(default=None, init=False)
     session_id: str | None = field(default=None, init=False)
     terminal_status: str | None = field(default=None, init=False)
+    early_turn_id: str | None = field(default=None, init=False)
     sequence: int = field(default=0, init=False)
 
     def __post_init__(self) -> None:
@@ -153,7 +154,10 @@ class OfflineAppServerContract:
                 self._reject("turn/start did not return a turn id")
             if turn.get("status") != "inProgress":
                 self._reject("turn was not acknowledged as in progress")
+            if self.early_turn_id is not None and self.early_turn_id != turn["id"]:
+                self._reject("pre-ack turn notification id mismatch")
             self.turn_id = turn["id"]
+            self.early_turn_id = None
             next_state = "turn_active"
         else:
             self._reject("unknown pending request")
@@ -170,6 +174,19 @@ class OfflineAppServerContract:
         params = message.get("params")
         if not isinstance(params, dict):
             self._reject("event must contain params")
+        # Validate thread association even on progress/approval-adjacent events.
+        if ("threadId" in params and self.thread_id is not None
+                and params["threadId"] != self.thread_id):
+            self._reject("notification belongs to a different thread")
+        if method == "turn/started" and self.state == "turn_pending":
+            turn = params.get("turn")
+            if (params.get("threadId") != self.thread_id or not isinstance(turn, dict)
+                    or not _nonempty(turn.get("id"))):
+                self._reject("invalid pre-ack turn notification")
+            if self.early_turn_id is not None and self.early_turn_id != turn["id"]:
+                self._reject("inconsistent pre-ack turn ids")
+            self.early_turn_id = turn["id"]
+            return "pending_turn_ack"
         # Other progress notifications may contain model output or secrets:
         # do not persist or return their content from this contract.
         if method != "turn/completed":

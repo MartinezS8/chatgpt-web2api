@@ -198,3 +198,34 @@ def test_unattested_success_cannot_create_another_turn():
     assert complete(m) == "transport_completed_unverified"
     with pytest.raises(ProtocolRejected, match="turn requires"):
         m.turn_start("duplicate send")
+
+
+def test_turn_started_before_ack_is_correlated_without_completing():
+    m = ready()
+    req = m.turn_start("synthetic")
+    assert m.receive_event({"method": "turn/started",
+                            "params": {"threadId": "thread-1",
+                                       "turn": {"id": "turn-early"}}}) == "pending_turn_ack"
+    assert m.turn_id is None
+    ack(m, req, {"turn": {"id": "turn-early", "status": "inProgress"}})
+    assert m.turn_id == "turn-early"
+    assert complete(m, turn_id="turn-early") == "transport_completed_unverified"
+
+
+def test_pre_ack_notification_mismatch_blocks_turn():
+    m = ready()
+    req = m.turn_start("synthetic")
+    m.receive_event({"method": "turn/started",
+                     "params": {"threadId": "thread-1", "turn": {"id": "t1"}}})
+    with pytest.raises(ProtocolRejected, match="pre-ack turn notification id mismatch"):
+        ack(m, req, {"turn": {"id": "t2", "status": "inProgress"}})
+    assert m.state == "needs_human"
+
+
+def test_foreign_thread_progress_rejected_without_exposing_content():
+    m = active()
+    with pytest.raises(ProtocolRejected, match="different thread"):
+        m.receive_event({"method": "item/agentMessage/delta",
+                         "params": {"threadId": "foreign", "delta": "private"}})
+    assert m.state == "needs_human"
+    assert "private" not in repr(vars(m))
