@@ -150,6 +150,10 @@ def test_single_completed_turn_durable_receipts(context, monkeypatch):
     receipt = context[-1]
     assert (receipt / "intent.json").is_file()
     assert (receipt / "result.json").is_file()
+    intent_digest = hashlib.sha256((receipt / "intent.json").read_bytes()).hexdigest()
+    assert json.loads((receipt / "result.json").read_text(encoding="utf-8"))[
+        "intent_sha256"
+    ] == intent_digest
     assert not (receipt / "quarantine.json").exists()
     assert "Output exactly" not in (receipt / "intent.json").read_text("utf-8")
     with pytest.raises(ValueError, match="new"):

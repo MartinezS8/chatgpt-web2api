@@ -136,3 +136,29 @@ def test_missing_intent_is_not_a_verified_result(tmp_path):
     _write(root, "result.json", _result())
     output = inspect_local_pilot_receipt(root)
     assert output["classification"] == "INCONSISTENT_RECEIPT"
+
+
+def test_bound_receipt_rejects_changed_intent_without_authenticating_provider(receipt_dir):
+    import hashlib
+
+    intent = receipt_dir / "intent.json"
+    result = _result()
+    result["intent_sha256"] = hashlib.sha256(intent.read_bytes()).hexdigest()
+    _write(receipt_dir, "result.json", result)
+    report = inspect_local_pilot_receipt(receipt_dir)
+    assert report["classification"] == "TERMINAL_UNREVIEWED"
+    assert report["receipt_intent_binding_verified"] is True
+    changed = json.loads(intent.read_text(encoding="utf-8"))
+    changed["prompt_sha256"] = "b" * 64
+    intent.write_text(json.dumps(changed), encoding="utf-8")
+    report = inspect_local_pilot_receipt(receipt_dir)
+    assert report["classification"] == "INCONSISTENT_RECEIPT"
+    assert report["receipt_intent_binding_verified"] is False
+    assert report["provider_output_independently_verified"] is False
+
+
+def test_legacy_result_does_not_claim_binding(receipt_dir):
+    _write(receipt_dir, "result.json", _result())
+    report = inspect_local_pilot_receipt(receipt_dir)
+    assert report["receipt_intent_binding_verified"] is False
+    assert report["classification"] == "TERMINAL_UNREVIEWED"
