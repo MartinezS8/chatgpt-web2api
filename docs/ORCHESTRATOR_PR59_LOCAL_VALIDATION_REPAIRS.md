@@ -34,7 +34,32 @@ authentication, model/list, thread/start, turn/start or provider operation ran.
 The executable version is an alpha version: schema generation is not proof of
 runtime model availability or protocol interoperability.
 
-Full strict offline verification, wheel/sdist installation and exact-head
-GitHub checks must be evaluated separately. Focused tests are not full release
-evidence. No real worker is authorized. Hostile same-user TOCTOU remains FAIL;
-effective second-user denial and network confinement remain NOT TESTED.
+## Final local runtime evidence
+
+Exact implementation SHA e914de26569c00956d2a2bd8336f1d105dd7c9f2 passed
+the full strict verifier: 1450 passed, 3 skipped, 20 subtests; compileall and
+Ruff exit 0; exact SHA matched; clean worktree before and after. E2E was disabled.
+Wheel/sdist build and fresh installed-wheel CLI, five-worker synthetic DAG,
+idempotence, crash quarantine/no replay and read-only MCP smoke passed. Receipt:
+LOCALAPPDATA/w2a-validation-phase58/reviewed-wheel-smoke.json. Strict diagnostic
+receipt: LOCALAPPDATA/w2a-validation-phase58/strict-diagnostics.log.
+
+The earlier complete run on 1ebce17 had pytest exit 1 with only an output hash
+retained. Its individual failure cannot be reconstructed or attributed to a
+fix. It did not recur in the final diagnostic run; this is an unresolved
+historical failure, not proof that a specific cause was repaired. Intermediate
+runs deliberately stopped for review changes do not count as PASS.
+
+Offline JSON Schema comparison of seven fixture request/response structures
+against the generated 0.163.0-alpha.11 schema found the synthetic 0.157
+thread/start response incompatible at approvalsReviewer, sandbox and
+thread.source. The other six structures validated. This is NOT a supported
+live adapter for 0.163.0-alpha.11. Schema capture does not attest entitlement,
+models/efforts, runtime behavior or sandboxing. Detailed local comparison:
+LOCALAPPDATA/w2a-validation-phase58/fixture-schema-comparison.json.
+
+Exact-head GitHub CI for the new branch must still reach terminal success.
+No real worker is authorized. Hostile same-user TOCTOU remains FAIL; effective
+second-user denial and network confinement remain NOT TESTED. The process-SID
+audit gate remains inert and is not trusted IPC, independent evidence,
+quarantine release, retry permission or finalization.

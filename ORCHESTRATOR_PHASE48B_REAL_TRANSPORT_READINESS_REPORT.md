@@ -1,5 +1,32 @@
 # Orchestrator Phase 48b–48c Readiness Report
 
+## Follow-up assessment after PR #58 (2026-10-22)
+
+The historical assessment below is supplemented by the current validation of
+the stack through PR #58 (00f8d4f5c9c9faa004497a07f22932df70ccb4db).
+New local fixes prevent creation of missing append-probe markers and support
+the actual 318-schema installed Codex bundle with bounded enumeration and
+aggregate bytes. Exact implementation e914de26569c00956d2a2bd8336f1d105dd7c9f2
+passed Windows/CPython 3.12 full strict verification: 1450 passed, 3 skipped,
+20 subtests; Ruff/compileall passed; exact SHA and clean tree before/after.
+Build and fresh installed-wheel CLI/mock/crash/MCP smoke passed. New-branch
+GitHub CI remains a separate required receipt.
+
+Actual local Codex is 0.163.0-alpha.11. Offline schema generation passed, but
+the old synthetic thread/start response does not validate against this CLI's
+schema (approvalsReviewer, sandbox and thread.source). No live compatibility,
+account model/effort availability or provider inference is established.
+
+The newer Windows TokenUser-bound challenge journal records only unresolved
+audit decisions. It does not implement trusted IPC, independent delivery
+evidence, release, retry or finalization. Phase 48c remains PARTIAL; Phase 48d
+remains BLOCKED by missing proven isolation and specific live permission.
+Same-user hostile TOCTOU remains FAIL and effective second-user ACL denial
+remains NOT TESTED. Gates 49–51 real-worker acceptance remains NOT TESTED.
+
+See [local validation repairs and receipts](docs/ORCHESTRATOR_PR59_LOCAL_VALIDATION_REPAIRS.md),
+including the unresolved earlier local pytest failure and skipped evidence.
+
 **Assessment date:** 2026-10-22
 
 **Status:** Phase 48b PASS for the offline fake; Phase 48c PARTIAL; Phase 48d BLOCKED pending a separate, specific live-operation authorization and a demonstrable Windows worker boundary.
