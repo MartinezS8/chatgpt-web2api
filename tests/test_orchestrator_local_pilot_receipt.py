@@ -49,7 +49,7 @@ def test_terminal_receipt_is_not_auto_finalized_or_retried(receipt_dir):
     _write(receipt_dir, "result.json", _result())
     before = (receipt_dir / "result.json").read_bytes()
     outcome = inspect_local_pilot_receipt(receipt_dir)
-    assert outcome["classification"] == "TERMINAL_UNREVIEWED"
+    assert outcome["classification"] == "LEGACY_TERMINAL_OUTPUT_UNCHECKED"
     assert outcome["provider_output_independently_verified"] is False
     assert outcome["automatic_retry_permitted"] is False
     assert outcome["production_finalization_permitted"] is False
@@ -146,7 +146,7 @@ def test_bound_receipt_rejects_changed_intent_without_authenticating_provider(re
     result["intent_sha256"] = hashlib.sha256(intent.read_bytes()).hexdigest()
     _write(receipt_dir, "result.json", result)
     report = inspect_local_pilot_receipt(receipt_dir)
-    assert report["classification"] == "TERMINAL_UNREVIEWED"
+    assert report["classification"] == "LEGACY_TERMINAL_OUTPUT_UNCHECKED"
     assert report["receipt_intent_binding_verified"] is True
     changed = json.loads(intent.read_text(encoding="utf-8"))
     changed["prompt_sha256"] = "b" * 64
@@ -161,4 +161,21 @@ def test_legacy_result_does_not_claim_binding(receipt_dir):
     _write(receipt_dir, "result.json", _result())
     report = inspect_local_pilot_receipt(receipt_dir)
     assert report["receipt_intent_binding_verified"] is False
-    assert report["classification"] == "TERMINAL_UNREVIEWED"
+    assert report["classification"] == "LEGACY_TERMINAL_OUTPUT_UNCHECKED"
+
+
+@pytest.mark.parametrize("matches,observed,expected", [
+    (True, True, "TERMINAL_OUTPUT_MATCHED_UNREVIEWED"),
+    (False, True, "TERMINAL_OUTPUT_MISMATCH_OR_MISSING"),
+    (False, False, "TERMINAL_OUTPUT_MISMATCH_OR_MISSING"),
+])
+def test_terminal_transport_is_not_confused_with_correct_answer(
+    receipt_dir, matches, observed, expected,
+):
+    result = _result()
+    result["assistant_output_matches_expected"] = matches
+    result["assistant_message_observed"] = observed
+    _write(receipt_dir, "result.json", result)
+    report = inspect_local_pilot_receipt(receipt_dir)
+    assert report["classification"] == expected
+    assert report["production_finalization_permitted"] is False
