@@ -101,3 +101,18 @@ def test_cannot_validate_wrong_phase_or_non_object(local_bundle):
         v.require("unbound", {})
     with pytest.raises(ValueError, match="invalid"):
         v.require("turn_result", [])
+
+
+def test_semantically_wrong_schema_title_is_rejected(local_bundle):
+    target = local_bundle / PHASES["thread_params"]
+    document = json.loads(target.read_text(encoding="utf-8"))
+    document["title"] = "TurnStartParams"
+    target.write_text(json.dumps(document), encoding="utf-8")
+    manifest_file = local_bundle / "offline-readiness.json"
+    manifest = json.loads(manifest_file.read_text(encoding="utf-8"))
+    for entry in manifest["generated_json_schema"]:
+        if entry["path"] == target.name:
+            entry["sha256"] = hashlib.sha256(target.read_bytes()).hexdigest()
+    manifest_file.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="title belongs"):
+        LocalWireSchemas(local_bundle, selections=PHASES)

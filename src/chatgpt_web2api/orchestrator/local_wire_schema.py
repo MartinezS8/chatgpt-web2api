@@ -9,14 +9,19 @@ from __future__ import annotations
 from pathlib import Path
 
 from jsonschema import validators
-from referencing import Registry, Resource
-from referencing.jsonschema import DRAFT202012
-
-from .schema_fixture_audit import _selected_relative, verified_bundle
+from .schema_fixture_audit import (
+    _selected_relative, build_local_schema_registry, verified_bundle,
+)
 
 _PHASES = (
     "thread_params", "thread_result", "turn_params", "turn_result",
 )
+_TITLES = {
+    "thread_params": "ThreadStartParams",
+    "thread_result": "ThreadStartResponse",
+    "turn_params": "TurnStartParams",
+    "turn_result": "TurnStartResponse",
+}
 
 # Wrongly selected permissive JSON schemas can otherwise report a fake PASS.
 # These are intentionally malformed instances of each *concrete* RPC shape.
@@ -51,17 +56,13 @@ class LocalWireSchemas:
         if any(name not in documents for name in names.values()):
             raise ValueError("selected wire schema is absent from pinned bundle")
         root = Path(bundle_root).expanduser().resolve()
-        resources = []
-        for relative, document in documents.items():
-            resource = Resource.from_contents(document, default_specification=DRAFT202012)
-            resources.append(((root / relative).as_uri(), resource))
-            schema_id = document.get("$id")
-            if isinstance(schema_id, str) and schema_id:
-                resources.append((schema_id, resource))
-        registry = Registry().with_resources(resources)
+        registry, bound = build_local_schema_registry(root, documents)
         self._validators = {}
         for phase, name in names.items():
-            document = documents[name]
+            document = bound[name]
+            title = documents[name].get("title")
+            if title is not None and title != _TITLES[phase]:
+                raise ValueError(f"selected {phase} schema title belongs to another RPC")
             validator_class = validators.validator_for(document)
             validator_class.check_schema(document)
             validator = validator_class(document, registry=registry)

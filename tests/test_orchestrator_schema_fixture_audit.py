@@ -104,3 +104,28 @@ def test_no_uncaptured_schema_file_is_accepted(captured):
     (root / "extra.json").write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="unexpected"):
         verified_bundle(root)
+
+
+def test_schema_file_relative_ref_is_resolved_within_captured_bundle(captured):
+    root, fixture = captured
+    other = root / "Other.json"
+    other.write_text(json.dumps({
+        "$defs": {"text": {"type": "string", "minLength": 2}},
+    }), encoding="utf-8")
+    entry = root / "ThreadStartResponse.json"
+    entry.write_text(json.dumps({
+        "type": "object",
+        "required": ["token"],
+        "properties": {"token": {"$ref": "Other.json#/$defs/text"}},
+    }), encoding="utf-8")
+    manifest_path = root / "offline-readiness.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["generated_json_schema"] = [
+        {"path": p.name, "sha256": hashlib.sha256(p.read_bytes()).hexdigest()}
+        for p in (entry, other)
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    fixture.write_text('{"token":"okay"}', encoding="utf-8")
+    assert audit_fixture(root, entry.name, fixture)["valid"] is True
+    fixture.write_text('{"token":"x"}', encoding="utf-8")
+    assert audit_fixture(root, entry.name, fixture)["valid"] is False
