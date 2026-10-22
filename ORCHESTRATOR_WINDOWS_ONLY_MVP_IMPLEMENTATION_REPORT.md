@@ -77,7 +77,7 @@ Luna Max handles disjoint setup/docs and workflow/scanner files. Main agent
 owns package configuration, regression contracts, integration and review.
 No runtime storage security mechanism or fixture reexport is removed.
 
-## Phase 47 — PASS on implementation commit 0088e1a
+## Phase 47 — PASS on implementation commit 0088e1a; CI follow-up on f351109
 
 The existing scheduler requires production `finished` dependencies while the
 production finalizer is disabled. The demo must use an explicitly separate
@@ -119,13 +119,15 @@ Found and fixed during implementation:
 | P2 integrity | Initial synthetic completion consumption omitted session/turn correlation | Independent Luna review reproduced session drift retaining completion; three failing regressions added, then fixed session hash + conversation/delivery matching |
 | P2 safety | Reopen could create a demo lock before checking marker ownership | Identity is now checked before lock creation and again before Store; negative test confirms no lock/DB mutation without marker |
 | P2 runtime | Protected native SQLite connections were repeatedly opened and closed during each mock operation; the first hosted wheel demo ran for about 9 minutes and returned exit 2 before completing the DAG | Added a thread-local protected connection scope for one controller thread and each mock worker thread. Each Store operation still revalidates the policy and independently commits or rolls back; native SQLite handles remain pinned until scope exit. Added rollback, thread isolation, mode-change, policy-denial, unfinished-transaction, exception cleanup, and native Windows main/WAL/SHM handle tests. The completed local native demo now takes about 57 seconds after initialization. |
+| P2 test reliability | Hosted Windows run timed out while generating two synthetic 6,000-row hot rollback journals | Reduced only those fixtures to 64 rows, still beyond a five-page cache; genuine journal header/recovery assertions remain. The focused native modules and both full exact-SHA suites pass. |
 
 The fixes are committed on `codex/orchestrator-v43-offline-mvp`:
 
 - `06f1b52a95d84a6ec80ded0dbf8c5be65a1484f8` — fixed five-worker offline demo.
 - `0088e1a6ba10f270395c45d27637998c29c114a1` — protected connection scope and
-  regression coverage. This is the implementation SHA below and the current
-  pushed PR head at the time of the test receipts.
+  regression coverage; initial installed-MVP evidence below.
+- `f351109ed3a83206aa00c58998ecc78d65cdb66a` — bounded hot-journal fixtures
+  after hosted Windows timeouts; no storage-policy or production gate changed.
 
 Local targeted regression suite: **125 passed** (including protected storage,
 packages, upload preflight/outbox, demo, connection-scope and CI contracts).
@@ -163,6 +165,37 @@ The workflow's Gitleaks and build jobs both passed. The separate `ci.yml` retain
 its master-target trigger and was not triggered on this stacked PR. Node.js
 20-to-24 compatibility/deprecation annotations were non-failing.
 
+### Windows hot-journal validation follow-up
+
+The report-only commit `4158800688ee130bf28fde19d60956845a5d9cb0` exposed two
+Windows CI failures in hosted run
+[39759763287](https://github.com/MartinezS8/chatgpt-web2api/actions/runs/39759763287):
+the child processes used to create a synthetic hot rollback journal exceeded
+their 30-second timeout in `test_hot_recovery_path_change_is_reported_despite_late_failure`
+and `test_protected_startup_recovers_legacy_delete_hot_journal`. The first
+therefore reported `NOT_TESTED`, and the storage-pin test timed out. This was a
+test-fixture runtime issue; the CI output does not establish a storage-code
+failure or a security pass for the hostile-process model.
+
+Commit `f351109ed3a83206aa00c58998ecc78d65cdb66a` reduces only these two hot-
+journal probes from 6,000 rows to 64. The workload still dirties more pages than
+the child's five-page cache; both tests assert the genuine SQLite hot-journal
+header and verify rollback/recovery state. The change makes no claim against
+hostile concurrent path swaps and does not change the protected storage
+algorithm. Both full native test modules passed locally: **44 passed in 134.18 s**
+(`C:\Users\xxx\w2a-v43-415-hot-journal-focused.log`).
+
+Exact-SHA local strict verification on `f351109`, Windows 11 Pro x64 build
+26200, CPython 3.12.10: **1273 passed, 3 skipped, 20 subtests** (pytest 518.43 s);
+compileall and Ruff passed, the SHA matched at start/end, and the worktree was
+clean before and after (`C:\Users\xxx\w2a-v43-f351109-strict.log`).
+Hosted run [39763371611](https://github.com/MartinezS8/chatgpt-web2api/actions/runs/39763371611)
+passed on the exact `f351109` SHA: strict Windows/Python 3.12 **1274 passed,
+2 skipped, 20 subtests** (pytest 636.06 s), compileall/Ruff, exact SHA and clean
+pre/postflight; full-history Gitleaks; and the dependent wheel/sdist build,
+fresh installed-wheel and CLI/offline-MVP/MCP smoke. All three jobs passed.
+The run is developer validation for this Windows/Python 3.12 branch only.
+
 Luna Max provided disjoint workflow/tests and an independent read-only review of
 the connection-scope diff; it reported no concrete defect. Main agent reviewed
 transaction boundaries, thread ownership and native handle lifetime. These
@@ -174,8 +207,9 @@ performed.
 
 | Gate | Status | Scope |
 | --- | --- | --- |
-| Windows/Python 3.12 CI | PASS | Phase47 exact0088e1a hosted run 39756391999; Phase46 receipt remains separately recorded |
-| Installed five-worker offline MVP | PASS | Fresh installed wheel, native Windows storage, five mock workers, DAG, callbacks, reviews, crash quarantine and read-only MCP smoke |
+| Windows/Python 3.12 CI | PASS | Latest exact-code-SHA run 39763371611 on f351109; the earlier 0088e1a run 39756391999 is historical |
+| Installed five-worker offline MVP | PASS | Hosted exact-f351109 build/install/CLI/offline-MVP/MCP smoke; native Windows storage, five mock identities, DAG, callbacks, reviews and crash quarantine |
+| Hot-journal crash/recovery regression | PASS | 44 tests across both native Windows modules; local and hosted full suites pass after reducing fixture volume |
 | Private Model 1 storage | PARTIAL | Native user-owned workspace and handle lifetime verified for cooperating processes; this is not a hostile-process guarantee |
 | Hostile same-user Model 2 / TOCTOU | FAIL | Existing content/journal findings remain |
 | Effective second-user ACL denial | NOT TESTED | No authorized second token |
@@ -209,8 +243,9 @@ recommended first adapter candidate; this is a design inference, not a tested
 entitlement or transport. No Codex/provider process or live turn was started.
 Account/model/effort access and ChatGPT web app equivalence remain unverified.
 
-This report is an implementation record, not production approval. Its code
-evidence is pinned to implementation SHA `0088e1a6ba10f270395c45d27637998c29c114a1`.
-The final report commit contains documentation only and is rechecked by the
-same strict workflow; the exact current report HEAD is available in PR47's
-commit list. The open security gates and phases 48–51 remain unfinished.
+This report is an implementation record, not production approval. The MVP
+implementation and successful Windows validation follow-up are pinned to
+`f351109ed3a83206aa00c58998ecc78d65cdb66a`; the initial demo implementation
+and installed-wheel receipt are pinned to `0088e1a6ba10f270395c45d27637998c29c114a1`.
+Any later report-only commit is documentation and does not change those code
+receipts. The open security gates and phases 48–51 remain unfinished.
