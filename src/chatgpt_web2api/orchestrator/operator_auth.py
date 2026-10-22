@@ -135,6 +135,12 @@ class WindowsOperatorQuarantineGate:
         ).fetchone()
         if row is None or row["status"] not in _QUARANTINED:
             raise ValueError("attempt is not in a reviewable offline state")
+        if (row["task_state"] not in {"unknown_delivery", "needs_human"}
+                or row["outbox_status"] not in {
+                    "unknown", "needs_human", "offline_not_sent",
+                    "offline_simulated_unverified",
+                }):
+            raise ValueError("attempt is no longer in a conservative review state")
         return row
 
     def _migrate(self) -> None:

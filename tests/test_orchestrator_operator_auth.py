@@ -200,3 +200,17 @@ def test_future_schema_version_fails_closed(quarantined):
         auth.WindowsOperatorQuarantineGate(
             ledger, trusted_operator_sids=frozenset({_OPERATOR}),
         )
+
+
+def test_task_outbox_state_mismatch_never_creates_challenge(quarantined):
+    store, _, _, attempt, gate = quarantined
+    with store._connect() as db:
+        db.execute(
+            "UPDATE tasks SET state='verified' WHERE task_id='task-auth'"
+        )
+    with pytest.raises(ValueError, match="conservative review"):
+        gate.issue_challenge(attempt, disposition="delivery_unresolved")
+    with store._connect() as db:
+        assert db.execute(
+            "SELECT COUNT(*) FROM orchestrator_operator_challenges"
+        ).fetchone()[0] == 0
