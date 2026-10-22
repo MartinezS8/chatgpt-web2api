@@ -45,8 +45,9 @@ marker in the disposable `w2a-isolation-probe-*` directory.
 
 ### Test surface
 
-The worker probe attempts reading, appending, creating a new scratch file,
-renaming and deleting the synthetic marker. These actions are intentionally
+The worker probe attempts reading the primary sentinel, appending to an
+independent append-only marker, creating a scratch file, renaming a separate
+rename marker and deleting a separate disposable deletion marker. These actions are intentionally
 limited to a specially named disposable root. If a check unexpectedly succeeds,
 its success is a **failure** of the isolation hypothesis. The script avoids
 claiming true attestation or full protection merely because some operations
@@ -72,3 +73,19 @@ cookies. Those are separate prerequisites of a live worker.
 
 Same-user hostile TOCTOU remains FAIL; second-user ACL remains NOT TESTED
 until independently run; OS-network confinement NOT TESTED.
+
+### Follow-up integrity hardening — PR #58
+
+The prepare command now creates **four synthetically named files** rather than
+one. The original `probe-sentinel.bin` is used only for the read attempt; all
+potentially mutating checks target their own disposable marker. An unexpected
+permissive ACL can report `FAIL_ACCESS_ALLOWED` without destroying or appending
+to the original independent attestation marker. The prepare receipt retains
+`synthetic_marker_sha256` and additionally includes per-operation marker hashes.
+A workspace prepared with the older one-file procedure is NOT equivalent to a
+complete new test; create a new disposable workspace for a fresh probe.
+
+This diagnostic still does not attest independent authorization, file system
+isolation of actual controller databases, child processes, network boundaries
+or credential protection. Do not automatically treat any DENIED outcome as
+production authorization.

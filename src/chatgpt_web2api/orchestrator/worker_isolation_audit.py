@@ -14,6 +14,9 @@ from pathlib import Path
 
 _LABEL = re.compile(r"w2a-isolation-probe-[a-z0-9-]{6,40}\Z")
 _MARKER = "probe-sentinel.bin"
+_APPEND_MARKER = "probe-append-sentinel.bin"
+_RENAME_MARKER = "probe-rename-sentinel.bin"
+_DELETE_MARKER = "probe-delete-sentinel.bin"
 _OWNER_TESTS = ("read", "append", "create", "rename", "delete")
 
 
@@ -61,10 +64,23 @@ def prepare_disposable_probe(label: str) -> dict:
     workspace = create_private_windows_workspace(label)
     root = _probe_root(workspace.root)
     marker = root / _MARKER
-    marker.write_bytes(b"offline-second-user-probe:" + uuid.uuid4().hex.encode("ascii"))
+    # Each potentially mutating access check has its OWN disposable marker.
+    # The original read-only sentinel must survive even when isolation FAILS.
+    for kind, filename in (
+        ("read", _MARKER), ("append", _APPEND_MARKER),
+        ("rename", _RENAME_MARKER), ("delete", _DELETE_MARKER),
+    ):
+        (root / filename).write_bytes(
+            b"offline-second-user-probe:" + kind.encode("ascii") + b":"
+            + uuid.uuid4().hex.encode("ascii")
+        )
     return {
         "root": str(root), "controller_sid": current_windows_sid(),
         "synthetic_marker_sha256": hashlib.sha256(marker.read_bytes()).hexdigest(),
+        "operation_marker_sha256": {
+            name: hashlib.sha256((root / name).read_bytes()).hexdigest()
+            for name in (_APPEND_MARKER, _RENAME_MARKER, _DELETE_MARKER)
+        },
         "production_authorized": False,
         "instructions": "Run the separate --probe command under an EXISTING authorized "
                         "restricted second Windows identity; preserve both local receipts.",
@@ -111,11 +127,14 @@ def probe_disposable_root(root_value: str | Path, *, expected_controller_sid: st
                 "different_identity": False, "checks": {},
                 "live_send_permitted": False, "production_authorized": False}
     marker = root / _MARKER
+    append_target = root / _APPEND_MARKER
+    rename_target = root / _RENAME_MARKER
+    delete_target = root / _DELETE_MARKER
     scratch = root / ("probe-attempt-" + uuid.uuid4().hex + ".tmp")
     moved = root / ("probe-renamed-" + uuid.uuid4().hex + ".tmp")
 
     def append_marker():
-        with marker.open("ab") as f:
+        with append_target.open("ab") as f:
             f.write(b"x")
 
     def create_scratch():
@@ -129,9 +148,9 @@ def probe_disposable_root(root_value: str | Path, *, expected_controller_sid: st
             pass
 
     def rename_marker():
-        marker.rename(moved)
+        rename_target.rename(moved)
         try:
-            moved.rename(marker)
+            moved.rename(rename_target)
         except OSError:
             # The first rename already succeeded; report ALLOWED.
             pass
@@ -140,7 +159,7 @@ def probe_disposable_root(root_value: str | Path, *, expected_controller_sid: st
                "append": _check(append_marker),
                "create": _check(create_scratch),
                "rename": _check(rename_marker),
-               "delete": _check(marker.unlink)}
+               "delete": _check(delete_target.unlink)}
     return {
         "status": _assessment(results), "probe_sid": sid,
         "different_identity": True, "checks": results,
