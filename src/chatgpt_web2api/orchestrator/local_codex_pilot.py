@@ -203,7 +203,14 @@ def _verify_effective_thread_settings(response: dict, *, model: str, cwd: Path) 
     Missing or mismatched effective values reject the pilot before turn/start.
     """
     sandbox = response.get("sandbox")
-    read_only = sandbox == "read-only" or sandbox == {"type": "readOnly"}
+    read_only = sandbox == "read-only"
+    if type(sandbox) is dict and set(sandbox).issubset({"type", "networkAccess"}):
+        network_access = sandbox.get("networkAccess", False)
+        read_only = (
+            sandbox.get("type") == "readOnly"
+            and type(network_access) is bool
+            and network_access is False
+        )
     if (response.get("model") != model
             or response.get("approvalPolicy") != "never"
             or not read_only

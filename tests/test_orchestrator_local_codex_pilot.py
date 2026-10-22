@@ -363,6 +363,43 @@ def test_effective_thread_settings_mismatch_blocks_turn(context, monkeypatch, pr
     ]
 
 
+def test_explicit_read_only_network_false_allows_single_turn(context, monkeypatch):
+    frames = _success_frames()
+    frames[2]["result"]["sandbox"] = {
+        "type": "readOnly", "networkAccess": False,
+    }
+    process = _FakeProcess(frames)
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: process)
+
+    result = _run(context, allow_one_turn=True)
+
+    assert result["retry_permitted"] is False
+    assert [json.loads(s)["method"] for s in process.stdin.getvalue().splitlines()].count(
+        "turn/start"
+    ) == 1
+
+
+@pytest.mark.parametrize("sandbox", [
+    {"type": "readOnly", "networkAccess": True},
+    {"type": "readOnly", "networkAccess": 0},
+    {"type": "readOnly", "networkAccess": False, "unknownPolicy": "value"},
+])
+def test_effective_read_only_policy_rejects_network_or_unknown_fields(
+    context, monkeypatch, sandbox,
+):
+    frames = _success_frames()
+    frames[2]["result"]["sandbox"] = sandbox
+    process = _FakeProcess(frames)
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: process)
+
+    with pytest.raises(RuntimeError, match="effective thread"):
+        _run(context, allow_one_turn=True)
+
+    assert "turn/start" not in [
+        json.loads(s)["method"] for s in process.stdin.getvalue().splitlines()
+    ]
+
+
 def test_model_reroute_is_not_accepted_as_success(context, monkeypatch):
     frames = _success_frames()
     frames.insert(-1, {"method": "model/rerouted", "params": {
