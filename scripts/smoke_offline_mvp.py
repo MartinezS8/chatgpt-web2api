@@ -59,6 +59,7 @@ async def _mcp(label):
         "orchestrator_reviews": {"target_task_id": "01-a"},
         "orchestrator_proposals": {"target_task_id": "01-a"},
         "orchestrator_evidence": {"task_id": "01-a"},
+        "orchestrator_app_server_delivery": {"attempt_id": "synthetic-no-attempt"},
     }
     replies = {}
     async with asyncio.timeout(240):
@@ -68,6 +69,10 @@ async def _mcp(label):
                 tools = (await client.list_tools()).tools
                 assert {tool.name for tool in tools} == set(arguments)
                 assert all(tool.inputSchema["additionalProperties"] is False for tool in tools)
+                delivery_tool = next(
+                    tool for tool in tools if tool.name == "orchestrator_app_server_delivery"
+                )
+                assert delivery_tool.inputSchema["properties"]["attempt_id"]["maxLength"] == 128
                 for name, args in arguments.items():
                     result = await client.call_tool(name, args)
                     assert not result.isError, name
@@ -79,6 +84,7 @@ async def _mcp(label):
     assert len(replies["orchestrator_workers"]["workers"]) == 5
     assert len(replies["orchestrator_callbacks"]["callbacks"]) == 5
     assert replies["orchestrator_evidence"]["evidence"]["assurance"] == "offline_mock_only"
+    assert replies["orchestrator_app_server_delivery"]["delivery"] is None
     assert replies["orchestrator_reviews"]["reviews"][0]["assurance"] == "offline_mock_only"
     events = replies["orchestrator_events"]["events"]
     assert len(events) == 15

@@ -22,6 +22,7 @@ _TOOL_PARAMS = {
     "orchestrator_reviews": ("target_task_id",),
     "orchestrator_proposals": ("target_task_id",),
     "orchestrator_evidence": ("task_id",),
+    "orchestrator_app_server_delivery": ("attempt_id",),
 }
 
 
@@ -47,6 +48,8 @@ def dispatch_observer(observer: Observer, name: str, arguments: dict | None = No
         return observer.proposals(args["target_task_id"])
     if name == "orchestrator_evidence":
         return observer.evidence(args["task_id"])
+    if name == "orchestrator_app_server_delivery":
+        return observer.app_server_delivery(args["attempt_id"])
     if name == "orchestrator_events":
         return observer.events(after=args.get("after",0),limit=args.get("limit",100))
     if name == "orchestrator_callbacks":
@@ -66,6 +69,8 @@ def create_server(database: str | Path, *, storage_policy=None):
         out=[]
         for name,required in _TOOL_PARAMS.items():
             props={key:{"type":"string"} for key in required}
+            if name == "orchestrator_app_server_delivery":
+                props["attempt_id"]["maxLength"] = 128
             if name in ("orchestrator_events","orchestrator_callbacks"):
                 props.update({"after":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1,"maximum":200}})
             out.append(mcp_types.Tool(name=name,description="Read-only local orchestration state; no remote actions",

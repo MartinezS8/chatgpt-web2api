@@ -45,7 +45,8 @@ class Observer:
                 "remote_upload": False, "hosted_plugins": False,
                 "model_or_effort_verification": False,
                 "user_approval_actions": False, "browser_sessions": False,
-                "methods": ["status", "events", "workers", "reviews", "proposals", "evidence", "callbacks"]}
+                "methods": ["status", "events", "workers", "reviews", "proposals",
+                            "evidence", "callbacks", "app_server_delivery"]}
 
     def status(self, project_id: str) -> dict:
         if not project_id:
@@ -102,4 +103,32 @@ class Observer:
         rows=self._read("""SELECT task_id,repository_id,pr_number,head_sha,run_id,digest,assurance,recorded_at
             FROM orchestrator_evidence WHERE task_id=? LIMIT ?""",(task_id,),limit=1)
         return {"evidence": rows[0] if rows else None}
+
+    def app_server_delivery(self, attempt_id: str) -> dict:
+        """Read safe app-server attempt metadata without credential hashes or payloads."""
+        if not isinstance(attempt_id, str) or not attempt_id or len(attempt_id) > 128:
+            raise ValueError("attempt_id required")
+        tables = self._read("SELECT name FROM sqlite_master WHERE type='table' "
+                            "AND name='orchestrator_app_server_attempts' LIMIT ?", limit=1)
+        if not tables:
+            return {"delivery": None, "messages": [], "events": [], "operator_disposition": None}
+        rows = self._read("""SELECT attempt_id,controller_id,worker_id,account_id,project_id,
+            task_id,transport,package_sha256,claim_version,assignment_version,
+            status,thread_id,turn_id,terminal_seen,created_at,updated_at
+            FROM orchestrator_app_server_attempts WHERE attempt_id=? LIMIT ?""",
+            (attempt_id,), limit=1)
+        if not rows:
+            return {"delivery": None, "messages": [], "events": [], "operator_disposition": None}
+        messages = self._read("""SELECT message_seq,message_kind,request_id,method,status,
+            created_at,updated_at FROM orchestrator_app_server_messages WHERE attempt_id=?
+            ORDER BY message_seq LIMIT ?""", (attempt_id,), limit=20)
+        events = self._read("""SELECT id,kind,message_seq,request_id,code,created_at
+            FROM orchestrator_app_server_events WHERE attempt_id=? ORDER BY id LIMIT ?""",
+            (attempt_id,), limit=100)
+        dispositions = self._read("""SELECT disposition,reason_code,created_at
+            FROM orchestrator_app_server_operator_dispositions WHERE attempt_id=? LIMIT ?""",
+            (attempt_id,), limit=1)
+        return {"delivery": rows[0], "messages": messages, "events": events,
+                "operator_disposition": dispositions[0] if dispositions else None,
+                "automatic_retry_permitted": False, "finalization_permitted": False}
 

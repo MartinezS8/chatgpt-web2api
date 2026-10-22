@@ -6,6 +6,7 @@ finalization authority. Unknown responses quarantine the attempt in memory.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -27,6 +28,8 @@ from .app_server_contract import OfflineAppServerContract, ProtocolRejected
 _LOG = logging.getLogger(__name__)
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
 _EOF = object()
+_MAX_MODEL_CHARS = 256
+_MAX_EFFORT_CHARS = 32
 
 
 class UnknownDelivery(RuntimeError):
@@ -52,6 +55,7 @@ class FakeAppServerScenario(StrEnum):
     FOREIGN_TURN_AFTER_ACK = "foreign_turn_after_ack"
     DUPLICATE_TERMINAL = "duplicate_terminal"
     BROKEN_PIPE_BEFORE_TURN = "broken_pipe_before_turn"
+    PARTIAL_CLIENT_SEND_BEFORE_TURN = "partial_client_send_before_turn"
     DIE_AFTER_TURN_REQUEST = "die_after_turn_request"
     TIMEOUT_AFTER_TURN_REQUEST = "timeout_after_turn_request"
     INTERRUPTED = "interrupted"
@@ -87,6 +91,14 @@ def _pairs_without_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
             raise ValueError("duplicate JSON object key")
         result[key] = value
     return result
+
+
+def _message_sha256(message: dict[str, Any]) -> str:
+    """Hash bounded protocol data without retaining or logging its contents."""
+    encoded = json.dumps(
+        message, ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def _json_string_encoded_size(value: str, *, limit: int) -> int | None:
@@ -271,6 +283,14 @@ class _FakeJsonlProcess:
                 self._notification_counts[method] = self._notification_counts.get(method, 0) + 1
             try:
                 assert process.stdin is not None
+                if (self._scenario == FakeAppServerScenario.PARTIAL_CLIENT_SEND_BEFORE_TURN
+                        and method == "turn/start"):
+                    # Model a local pipe interruption after a prefix reached
+                    # the child but before a complete newline-delimited frame.
+                    process.stdin.write(frame[:max(1, len(frame) // 2)])
+                    process.stdin.flush()
+                    self._unknown = True
+                    raise UnknownDelivery("app-server stdin stopped during a partial frame")
                 process.stdin.write(frame)
                 process.stdin.flush()
             except (BrokenPipeError, OSError, ValueError):
@@ -282,6 +302,7 @@ class _FakeJsonlProcess:
         message: dict[str, Any],
         *,
         on_notification: Callable[[dict[str, Any]], Any],
+        on_written: Callable[[], Any] | None = None,
         timeout_seconds: float,
     ) -> dict[str, Any]:
         # The caller drives requests serially and does not issue the next one
@@ -292,6 +313,8 @@ class _FakeJsonlProcess:
         if type(request_id) is not int:
             raise ProtocolRejected("outbound request id must be an integer")
         self._write(message, request=True)
+        if on_written is not None:
+            on_written()
         deadline = time.monotonic() + timeout_seconds
         while True:
             raw = self._next_raw(deadline)
@@ -317,10 +340,12 @@ class _FakeJsonlProcess:
                 raise UnknownDelivery("app-server request was rejected or omitted its result")
             return response
 
-    def notify(self, message: dict[str, Any]) -> None:
+    def notify(self, message: dict[str, Any], *, on_written: Callable[[], Any] | None = None) -> None:
         if "id" in message:
             raise ProtocolRejected("client notification must not contain a request id")
         self._write(message, request=False)
+        if on_written is not None:
+            on_written()
 
     def read_notification(
         self,
@@ -434,8 +459,18 @@ class OfflineFakeAppServer:
         if not isinstance(scenario, FakeAppServerScenario):
             raise TypeError("scenario must be an enumerated fake-only behavior")
         if (not isinstance(model, str) or not model or model.isspace()
-                or not isinstance(effort, str) or not effort or effort.isspace()):
+                or len(model) > _MAX_MODEL_CHARS
+                or not isinstance(effort, str) or not effort or effort.isspace()
+                or len(effort) > _MAX_EFFORT_CHARS):
             raise ValueError("exact synthetic model and effort are required")
+        try:
+            # Check strict UTF-8 while the values are bounded above; these
+            # fixed protocol fields are included in every serialized request.
+            if (len(model.encode("utf-8", errors="strict")) > _MAX_MODEL_CHARS * 4
+                    or len(effort.encode("utf-8", errors="strict")) > _MAX_EFFORT_CHARS * 4):
+                raise ValueError("exact synthetic model and effort are required")
+        except UnicodeEncodeError:
+            raise ValueError("exact synthetic model and effort are required") from None
         if (type(timeout_seconds) not in {int, float}
                 or not math.isfinite(timeout_seconds)
                 or not 0 < timeout_seconds <= 60
@@ -493,7 +528,20 @@ class OfflineFakeAppServer:
         finally:
             self._run_guard.release()
 
-    def _run_once(self, *, prompt: str, cwd: str) -> dict[str, Any]:
+    def _run_with_journal(self, *, prompt: str, cwd: str, journal) -> dict[str, Any]:
+        """Private hook used only by the durable offline-fake coordinator."""
+        from .app_server_delivery import AppServerDeliveryLedger
+
+        if type(journal) is not AppServerDeliveryLedger:
+            raise TypeError("offline fake journal must be the canonical app-server ledger")
+        if not self._run_guard.acquire(blocking=False):
+            raise ProtocolRejected("offline fake attempt is already running")
+        try:
+            return self._run_once(prompt=prompt, cwd=cwd, journal=journal)
+        finally:
+            self._run_guard.release()
+
+    def _run_once(self, *, prompt: str, cwd: str, journal=None) -> dict[str, Any]:
         if self._run_started:
             if self._delivery_status == "unknown_delivery":
                 raise UnknownDelivery("attempt is already quarantined; no retry is allowed")
@@ -531,16 +579,66 @@ class OfflineFakeAppServer:
         try:
             transport.start()
 
+            def receive_notification(message: dict[str, Any]) -> Any:
+                state = contract.receive_event(message)
+                if journal is not None:
+                    method = message.get("method")
+                    if method in {"turn/started", "turn/completed"}:
+                        journal._capture_notification(
+                            binding.attempt_id,
+                            method=method,
+                            thread_id=contract.thread_id,
+                            turn_id=contract.turn_id or contract.early_turn_id,
+                        )
+                return state
+
             def exchange(request: dict[str, Any]) -> None:
+                message_seq = None
+                if journal is not None:
+                    message_seq = journal._message_intent(
+                        binding.attempt_id,
+                        message_kind="request",
+                        request_id=request["id"],
+                        method=request["method"],
+                        message_sha256=_message_sha256(request),
+                    )
                 response = transport.request(
                     request,
-                    on_notification=contract.receive_event,
+                    on_notification=receive_notification,
+                    on_written=(
+                        lambda: journal._message_written(binding.attempt_id, message_seq)
+                        if journal is not None else None
+                    ),
                     timeout_seconds=timeout_seconds,
                 )
                 contract.receive_response(response)
+                if journal is not None:
+                    journal._message_acknowledged(
+                        binding.attempt_id,
+                        message_seq,
+                        response_sha256=_message_sha256(response),
+                        thread_id=contract.thread_id,
+                        turn_id=contract.turn_id or contract.early_turn_id,
+                    )
 
             exchange(contract.initialize())
-            transport.notify(contract.initialized())
+            initialized = contract.initialized()
+            initialized_seq = None
+            if journal is not None:
+                initialized_seq = journal._message_intent(
+                    binding.attempt_id,
+                    message_kind="notification",
+                    request_id=None,
+                    method=initialized["method"],
+                    message_sha256=_message_sha256(initialized),
+                )
+            transport.notify(
+                initialized,
+                on_written=(
+                    lambda: journal._message_written(binding.attempt_id, initialized_seq)
+                    if journal is not None else None
+                ),
+            )
             exchange(contract.model_list())
             thread_request = contract.thread_start(cwd=cwd)
             thread_params = thread_request["params"]
@@ -568,11 +666,11 @@ class OfflineFakeAppServer:
             exchange(turn_request)
             while contract.state == "turn_active":
                 transport.read_notification(
-                    on_notification=contract.receive_event,
+                    on_notification=receive_notification,
                     timeout_seconds=timeout_seconds,
                 )
             transport.finish(
-                on_notification=contract.receive_event,
+                on_notification=receive_notification,
                 timeout_seconds=timeout_seconds,
             )
             self._delivery_status = contract.state

@@ -439,3 +439,16 @@ is implied by branch diagnostics.
 - A registered resource alias is an assertion, not provider permission; never allow a direct external write based on it alone.
 - Exactly-once delivery cannot be asserted for a remote UI with no idempotency key; uncertain delivery stays quarantined.
 - File snapshotting is not uploading; local receipt events are not ChatGPT hosted callbacks; no live product feature is considered done without provider-confirmed E2E proof.
+
+## Phase 48c — Durable offline App Server delivery (local development branch)
+
+- [x] Add a separately versioned SQLite ledger bound to the existing unique dispatch attempt, recording immutable worker/account/project/task/attempt, package, claim/version, prompt-hash, request, thread and turn correlation.
+- [x] Commit send intent before each synthetic JSONL write; persist post-flush writes and contract-validated acknowledgements; include the `initialized` notification in the journal.
+- [x] Recover interrupted attempts into no-retry quarantine; successful fake turns remain `transport_completed_unverified` / `offline_simulated_unverified` and leave tasks `needs_human` with no result evidence or approval.
+- [x] Add bounded read-only MCP status for delivery metadata and an append-only, non-authorizing operator annotation.
+- [x] Add synthetic negative and crash-boundary regressions, including no second `turn/start` after recovery.
+- [ ] P0: Exact-head local strict Windows/Python 3.12 run, wheel/sdist build/install smoke and exact-head Draft PR CI receipts.
+- [ ] P0: Authenticated operator resolution/release semantics are intentionally not implemented; hostile same-user TOCTOU remains **FAIL** and effective second-user ACL denial remains **NOT TESTED**.
+- [ ] P0: No real app-server transport, real worker, or live provider authorization; Phase 48d requires fresh, specific approval and a separately proven sandbox.
+
+See [Phase 48c durable delivery ledger](ORCHESTRATOR_PHASE48C_DURABLE_DELIVERY.md).
