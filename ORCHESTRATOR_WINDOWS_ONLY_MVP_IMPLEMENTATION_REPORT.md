@@ -77,7 +77,7 @@ Luna Max handles disjoint setup/docs and workflow/scanner files. Main agent
 owns package configuration, regression contracts, integration and review.
 No runtime storage security mechanism or fixture reexport is removed.
 
-## Phase 47 — implemented; final installed-wheel acceptance pending
+## Phase 47 — PASS on implementation commit 0088e1a
 
 The existing scheduler requires production `finished` dependencies while the
 production finalizer is disabled. The demo must use an explicitly separate
@@ -85,6 +85,8 @@ synthetic completion path, with no asserted human approval or production
 authorization. Existing component unit tests do not prove an installed demo.
 
 Branch `codex/orchestrator-v43-offline-mvp` starts at the verified Phase46 SHA.
+It is the stacked [Draft PR47](https://github.com/MartinezS8/chatgpt-web2api/pull/47),
+based on Phase46 / `5db96767b78a6fd4e01404dfcb6cc30a54cca5bb`.
 `mock_sandbox.py` integrates the existing Store, Scheduler, WorkerRegistry,
 TaskPackages, UploadPreflight/UploadIntents, DispatchOutbox, CallbackInbox,
 EvidenceLedger, ReviewLedger and Planner schemas. `offline_demo.py` provides
@@ -116,24 +118,65 @@ Found and fixed during implementation:
 | P2 compatibility | App filesystem redirection made initial provisioning path differ from revalidated canonical root | All sensitive demo paths now come from policy context; native failure reproduced; canonical-path unit regression added |
 | P2 integrity | Initial synthetic completion consumption omitted session/turn correlation | Independent Luna review reproduced session drift retaining completion; three failing regressions added, then fixed session hash + conversation/delivery matching |
 | P2 safety | Reopen could create a demo lock before checking marker ownership | Identity is now checked before lock creation and again before Store; negative test confirms no lock/DB mutation without marker |
+| P2 runtime | Protected native SQLite connections were repeatedly opened and closed during each mock operation; the first hosted wheel demo ran for about 9 minutes and returned exit 2 before completing the DAG | Added a thread-local protected connection scope for one controller thread and each mock worker thread. Each Store operation still revalidates the policy and independently commits or rolls back; native SQLite handles remain pinned until scope exit. Added rollback, thread isolation, mode-change, policy-denial, unfinished-transaction, exception cleanup, and native Windows main/WAL/SHM handle tests. The completed local native demo now takes about 57 seconds after initialization. |
 
-The first 27 new regression cases pass locally; **75 focused tests** pass including
-existing upload/outbox/CI contracts. Independent follow-up verified the session fix
-with 18 sandbox/entry tests. Focused contracts use real SQLite
-with explicitly stubbed native ACL/pins and therefore are not native security proof.
-Native installed-wheel acceptance and the final strict/CI receipts remain pending
-at this implementation snapshot. `scripts/smoke_offline_mvp.py` exercises a fresh
-installed wheel, full demo/restart/doctor, all eight MCP tools, forbidden mutator,
-and a second fresh crash/unknown-delivery scenario without manual SQL. Both CI
-build jobs execute it under Windows/Python3.12 with verified user-default ownership.
+The fixes are committed on `codex/orchestrator-v43-offline-mvp`:
+
+- `06f1b52a95d84a6ec80ded0dbf8c5be65a1484f8` — fixed five-worker offline demo.
+- `0088e1a6ba10f270395c45d27637998c29c114a1` — protected connection scope and
+  regression coverage. This is the implementation SHA below and the current
+  pushed PR head at the time of the test receipts.
+
+Local targeted regression suite: **125 passed** (including protected storage,
+packages, upload preflight/outbox, demo, connection-scope and CI contracts).
+Native Windows demo on an isolated private workspace: initialization **14.14 s**;
+full run **57.46 s**, `demo_complete`, 5 tasks, 5 worker identities, 5 callbacks,
+5 mock upload receipts, 2 independent reviews and event cursor 15. All tasks
+remain `VERIFIED` with production locks held.
+
+Exact-SHA local strict verification on `0088e1a`, Windows 11 Pro x64 build 26200,
+CPython 3.12.10: **1273 passed, 3 skipped, 20 subtests** (pytest 524.25 s);
+compileall and Ruff passed, SHA matched at start/end, and the worktree was clean
+before and after. `W2A_E2E_RUN=0`; 31 real-account E2E tests were deselected.
+The structured receipt is stored outside the checkout at
+`C:\Users\xxx\w2a-v43-0088-strict.log`.
+
+Fresh external Windows wheel/sdist build succeeded. Wheel
+`chatgpt_web2api-0.2.0-py3-none-any.whl` SHA-256
+`6bf7f43d3145c737ee9db84ab710def75498b7cbfea46e4c17dc98f0e5598762`;
+sdist SHA-256 `6ae4b8c0e96a1f411e43a4a5dd51e3a22b15e2eabeaed04ddc0bc9f2f4e5de04`.
+The wheel installed into a fresh isolated Python 3.12.10 environment. All
+supported help/capabilities commands passed. The installed-wheel acceptance
+receipt passed 8 steps: `demo_complete`, idempotent rerun and doctor, MCP
+initialize/stdio handshake, all eight read-only tools and schemas, rejection of
+an unknown mutating tool, DAG event ordering, crash exit 17, restart quarantine
+as `needs_human`, and repeat restart without another attempt/cursor advance.
+It asserts `provider_calls=false` and `production_approval=false`.
+
+Local full-history Gitleaks 8.21.2 passed on `0088e1a`. Hosted run
+[39756391999](https://github.com/MartinezS8/chatgpt-web2api/actions/runs/39756391999)
+passed all three Windows/Python 3.12 jobs on that exact SHA: strict offline,
+full-history Gitleaks, and dependent wheel/sdist plus fresh install and offline
+MVP/MCP smoke. Hosted strict result: **1274 passed, 2 skipped, 20 subtests**
+(pytest 620.43 s), compileall/Ruff passed, exact SHA and clean pre/postflight.
+The workflow's Gitleaks and build jobs both passed. The separate `ci.yml` retains
+its master-target trigger and was not triggered on this stacked PR. Node.js
+20-to-24 compatibility/deprecation annotations were non-failing.
+
+Luna Max provided disjoint workflow/tests and an independent read-only review of
+the connection-scope diff; it reported no concrete defect. Main agent reviewed
+transaction boundaries, thread ownership and native handle lifetime. These
+receipts prove the offline Windows/Python 3.12 path only; no real provider call,
+second-user ACL denial, hostile same-user race, or production authorization was
+performed.
 
 ## Security gates
 
 | Gate | Status | Scope |
 | --- | --- | --- |
-| Windows/Python 3.12 CI | PASS | Phase46 exact5db9676 receipt; Phase47 rerun pending |
-| Installed five-worker offline MVP | NOT TESTED | Phase 47 acceptance pending |
-| Private Model 1 storage | PARTIAL | Existing contract; new regression pending |
+| Windows/Python 3.12 CI | PASS | Phase47 exact0088e1a hosted run 39756391999; Phase46 receipt remains separately recorded |
+| Installed five-worker offline MVP | PASS | Fresh installed wheel, native Windows storage, five mock workers, DAG, callbacks, reviews, crash quarantine and read-only MCP smoke |
+| Private Model 1 storage | PARTIAL | Native user-owned workspace and handle lifetime verified for cooperating processes; this is not a hostile-process guarantee |
 | Hostile same-user Model 2 / TOCTOU | FAIL | Existing content/journal findings remain |
 | Effective second-user ACL denial | NOT TESTED | No authorized second token |
 | Real worker transport and callback authentication | NOT TESTED | Not implemented or authorized |
@@ -166,5 +209,8 @@ recommended first adapter candidate; this is a design inference, not a tested
 entitlement or transport. No Codex/provider process or live turn was started.
 Account/model/effort access and ChatGPT web app equivalence remain unverified.
 
-This report is an implementation record, not production approval. Pending
-results must be replaced by observed evidence before declaring completion.
+This report is an implementation record, not production approval. Its code
+evidence is pinned to implementation SHA `0088e1a6ba10f270395c45d27637998c29c114a1`.
+The final report commit contains documentation only and is rechecked by the
+same strict workflow; the exact current report HEAD is available in PR47's
+commit list. The open security gates and phases 48–51 remain unfinished.
