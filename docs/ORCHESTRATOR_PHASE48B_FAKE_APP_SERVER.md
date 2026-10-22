@@ -68,9 +68,11 @@ reported in `ORCHESTRATOR_PHASE48B_REAL_TRANSPORT_READINESS_REPORT.md`.
 
 ## Explicit limitations
 
-- This in-memory harness has no SQLite authority. Phase 48c must persist worker,
-  package, claim, request, thread, turn, and prompt-hash binding before any future
-  turn bytes and recover uncertain sends to a no-retry state.
+- The harness remains in-memory by itself. Phase 48c adds a separate SQLite
+  journal around this fixed fake, persisting worker, package, claim, request,
+  thread, turn, and prompt-hash binding and recovering interrupted fake attempts
+  to a no-retry state. This journal still does not authorize future live turn
+  bytes; see [Phase 48c](ORCHESTRATOR_PHASE48C_DURABLE_DELIVERY.md).
 - A Python callback or frozen object is not an OS security boundary. The worker
   and controller share the same Windows identity here; hostile same-user TOCTOU
   protection remains **FAIL**. Effective denial to a second Windows user remains
