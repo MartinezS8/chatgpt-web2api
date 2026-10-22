@@ -43,6 +43,7 @@ def test_provision_alias_is_replaced_by_revalidated_canonical_paths(tmp_path, mo
         assert path.exists()
 
     policy = SimpleNamespace(check=lambda: context, source=require_source)
+    owned_store = SimpleNamespace(connection_scope=lambda: nullcontext())
     monkeypatch.setattr(offline_demo, "create_private_windows_workspace", lambda label:
                         SimpleNamespace(root=alias, database=alias / "controller.sqlite3", blobs=alias / "blobs"))
     monkeypatch.setattr(offline_demo.PrivateStoragePolicy, "open", lambda label: policy)
@@ -50,10 +51,10 @@ def test_provision_alias_is_replaced_by_revalidated_canonical_paths(tmp_path, mo
 
     def store(path, **kwargs):
         assert path == context.database and kwargs["storage_policy"] is policy
-        return "owned-store"
+        return owned_store
 
     def packages(store, path):
-        assert store == "owned-store" and path == context.blobs
+        assert store is owned_store and path == context.blobs
         return "owned-packages"
 
     monkeypatch.setattr(offline_demo, "Store", store)

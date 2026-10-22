@@ -176,6 +176,10 @@ class MockSandbox:
             task_id=task_id, worker_id=worker_id, claim_token=claim["task"]["claim_token"])
 
     def execute_claim(self, claim):
+        with self.store.connection_scope():
+            return self._execute_claim(claim)
+
+    def _execute_claim(self, claim):
         task, worker = claim["task"], claim["worker_id"]
         task_id, token = task["task_id"], task["claim_token"]
         intent = self.prepare_intent(claim)

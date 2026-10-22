@@ -59,11 +59,13 @@ def _verify_existing_identity(policy):
     return marker["nonce"]
 
 
+@contextmanager
 def _open_existing(policy):
     nonce = _verify_existing_identity(policy)
     context = policy.check()
     store = Store(context.database, storage_policy=policy)
-    return MockSandbox(store, TaskPackages(store, context.blobs), nonce=nonce)
+    with store.connection_scope():
+        yield MockSandbox(store, TaskPackages(store, context.blobs), nonce=nonce)
 
 
 def execute_demo(*, action: str, label: str, crash_after_intent: bool = False) -> dict:
@@ -83,26 +85,27 @@ def execute_demo(*, action: str, label: str, crash_after_intent: bool = False) -
                     json.dump({"schema": 1, "label": label, "nonce": nonce}, stream)
                 policy.source(context.root / _MARKER)
                 store = Store(context.database, storage_policy=policy)
-                packages = TaskPackages(store, context.blobs)
-                sandbox = MockSandbox(store, packages, nonce=nonce, create=True)
-                sandbox.initialize()
-                return {**sandbox.inspect(), "label": label, "initialized": True,
-                        "workspace": str(context.root), "exit_code": 0}
+                with store.connection_scope():
+                    packages = TaskPackages(store, context.blobs)
+                    sandbox = MockSandbox(store, packages, nonce=nonce, create=True)
+                    sandbox.initialize()
+                    return {**sandbox.inspect(), "label": label, "initialized": True,
+                            "workspace": str(context.root), "exit_code": 0}
         policy = PrivateStoragePolicy.open(label)
         # Do not create even the demo lock file in an unrelated private root.
         _verify_existing_identity(policy)
         with _cooperative_lock(policy):
-            sandbox = _open_existing(policy)
-            if action == "run":
-                result = sandbox.run(crash_after_intent=crash_after_intent)
-            else:
-                # Hash checks do not seal or replace missing/changed packages.
-                for task in sandbox.store.all("offline-demo"):
-                    sandbox.packages.read(task["task_id"], verify_blobs=True)
-                result = sandbox.inspect()
-            healthy = result["status"] in {"ready", "demo_complete"}
-            code = 0 if healthy and (action != "run" or result["status"] == "demo_complete") else 2
-            return {**result, "label": label, "exit_code": code}
+            with _open_existing(policy) as sandbox:
+                if action == "run":
+                    result = sandbox.run(crash_after_intent=crash_after_intent)
+                else:
+                    # Hash checks do not seal or replace missing/changed packages.
+                    for task in sandbox.store.all("offline-demo"):
+                        sandbox.packages.read(task["task_id"], verify_blobs=True)
+                    result = sandbox.inspect()
+                healthy = result["status"] in {"ready", "demo_complete"}
+                code = 0 if healthy and (action != "run" or result["status"] == "demo_complete") else 2
+                return {**result, "label": label, "exit_code": code}
     except sqlite3.Error as exc:
         raise ValueError("demo database rejected; no automatic repair or retry") from exc
     except portalocker.LockException as exc:
