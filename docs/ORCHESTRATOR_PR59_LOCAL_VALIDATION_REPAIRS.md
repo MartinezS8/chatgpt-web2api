@@ -58,8 +58,32 @@ live adapter for 0.163.0-alpha.11. Schema capture does not attest entitlement,
 models/efforts, runtime behavior or sandboxing. Detailed local comparison:
 LOCALAPPDATA/w2a-validation-phase58/fixture-schema-comparison.json.
 
-Exact-head GitHub CI for the new branch must still reach terminal success.
+GitHub run [39835778013](https://github.com/MartinezS8/chatgpt-web2api/actions/runs/39835778013)
+completed successfully on exact PR #59 head
+e52af8ec9a97db1bc924fb5fa243e051e592b881: full-history Gitleaks, strict
+Windows/Python 3.12 and dependent wheel/sdist/installed CLI/mock/crash/MCP jobs.
+The actual strict log reports 1451 passed, 2 skipped, 20 subtests; SHA matched
+before and after, and both worktree checks passed. Package logs confirm the
+idempotent demo and unknown-delivery quarantine after the synthetic crash.
+This documentation-only follow-up does not change the tested executable code;
+its own branch checks remain separately observable on the PR.
+
 No real worker is authorized. Hostile same-user TOCTOU remains FAIL; effective
 second-user denial and network confinement remain NOT TESTED. The process-SID
 audit gate remains inert and is not trusted IPC, independent evidence,
 quarantine release, retry permission or finalization.
+
+## Laptop capability and operator constraint
+
+A focused repeat of the dynamic capability tests passed four symlink checks
+and skipped the Windows long-path probe with WinError 206. The laptop's native
+long-path support is therefore not demonstrated; skipped is not PASS. Receipt:
+LOCALAPPDATA/w2a-validation-phase58/capability-skips.log. The two statically
+Windows-skipped POSIX tests are separate from this capability probe.
+
+The operator explicitly confirmed that no existing authorized restricted test
+context is available and instructed that the live gate remain blocked. No
+second-user probe was executed, no account was created, and no credentials
+were requested. Genuine OS isolation, account model discovery and a single
+real turn remain separate blocked/unexecuted gates. A mock receipt, local
+TokenUser match or successful CI cannot replace those requirements.
