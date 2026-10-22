@@ -14,6 +14,7 @@ from collections import Counter
 from pathlib import Path
 
 from .observer_commands import OBS_COMMANDS, configure_observer_commands, execute_observer_command
+from .operator_review import OperatorReviewBoard
 from .outbox import DispatchOutbox
 from .private_workspace import load_private_workspace
 from .resource_registry import ResourceIdentity, ResourceRegistry
@@ -103,6 +104,15 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--event-id", type=int, required=True)
     s = commands.add_parser("reconcile-dispatch", help="Quarantine aged unconfirmed send intents; never resends")
     s.add_argument("--stale-seconds", type=int, default=300)
+    s = commands.add_parser("operator-review-queue",
+                            help="Read quarantined offline attempts; no operator authorization")
+    s.add_argument("--limit", type=int, default=20)
+    s = commands.add_parser("operator-review-preview",
+                            help="Read-only suggested disposition; cannot release or retry")
+    s.add_argument("--attempt-id", required=True)
+    s.add_argument("--disposition", required=True,
+                   choices=("delivery_unresolved", "delivery_confirmed",
+                            "non_delivery_confirmed"))
     s = commands.add_parser("claim", help="Atomically reserve one eligible task without sending it")
     s.add_argument("--project", required=True)
     s.add_argument("--max-slots", type=int, default=5)
@@ -123,7 +133,8 @@ def _capabilities() -> dict:
                      "status", "list-tasks", "task", "events",
                      "create-task", "register-resource", "resolve-resource", "list-resources",
                      "seal-task", "task-package", "delivery-events", "ack-delivery-event",
-                     "reconcile-dispatch", "claim", "recover"],
+                     "reconcile-dispatch", "operator-review-queue",
+                     "operator-review-preview", "claim", "recover"],
         "automatic_web_dispatch": False,
         "chatgpt_ui_automation": False,
         "supabase_or_github_writes": False,
@@ -222,6 +233,13 @@ def execute(args: argparse.Namespace) -> dict:
         if args.command == "worker-claim":
             private.require_blob_root(args.blob_root)
             policy.blobs(args.blob_root)
+    if args.command in {"operator-review-queue", "operator-review-preview"}:
+        from .observer import Observer
+
+        board = OperatorReviewBoard(Observer(db_path, storage_policy=policy))
+        if args.command == "operator-review-queue":
+            return board.queue(limit=args.limit)
+        return board.preview(args.attempt_id, disposition=args.disposition)
     if args.command in OBS_COMMANDS:
         return execute_observer_command(args, db_path, storage_policy=policy)
     if args.command in WORKER_READ_COMMANDS and not db_path.is_file():
