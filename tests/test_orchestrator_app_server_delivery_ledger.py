@@ -460,3 +460,20 @@ def test_future_ledger_schema_version_fails_closed_without_replacing_schema(assi
             "SELECT version FROM orchestrator_schema_versions "
             "WHERE component='app-server-delivery-ledger'"
         ).fetchone()[0] == 99
+
+
+def test_operator_triage_of_unknown_send_is_read_only_and_non_authorizing(assigned):
+    store, outbox, claim, binding, ledger, prompt = _prepared(assigned)
+    fake = OfflineFakeAppServer(binding, scenario=FakeAppServerScenario.TIMEOUT_AFTER_TURN_REQUEST)
+    with pytest.raises(UnknownDelivery):
+        ledger.run_fake(fake, claim_token=claim, prompt=prompt, cwd="C:/synthetic/worktree")
+    before = ledger.reconcile(binding.attempt_id)
+    plan = ledger.triage(binding.attempt_id)
+    assert plan["classification"] == "delivery_ambiguous_quarantined"
+    assert plan["live_send_permitted"] is False
+    assert plan["automatic_retry_permitted"] is False
+    assert plan["new_attempt_permitted"] is False
+    assert plan["finalization_permitted"] is False
+    assert ledger.reconcile(binding.attempt_id) == before
+    assert store.get(binding.task_id)["state"] == TaskState.UNKNOWN_DELIVERY.value
+    assert outbox.get(binding.attempt_id)["status"] == "unknown"
