@@ -7,7 +7,10 @@ from pathlib import Path
 import pytest
 
 from chatgpt_web2api.orchestrator.worker_isolation_audit import (
-    _assessment, _check, _probe_root, probe_disposable_root,
+    _assessment,
+    _check,
+    _probe_root,
+    probe_disposable_root,
 )
 
 
