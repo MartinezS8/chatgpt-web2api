@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from .local_pilot_messages import thread_start_params, turn_start_params
+from .local_pilot_messages import read_pilot_prompt, thread_start_params, turn_start_params
 from .local_wire_schema import LocalWireSchemas
 from .storage_hardening import reject_reparse_path
 
@@ -22,13 +22,7 @@ def preview_local_one_turn(
     if not working.is_absolute() or not working.is_dir():
         raise ValueError("existing absolute scratch cwd required")
     reject_reparse_path(working, error_message="scratch cwd traverses reparse point")
-    prompt_path = Path(prompt_file).expanduser()
-    reject_reparse_path(prompt_path, error_message="test prompt traverses reparse point")
-    if not prompt_path.is_file() or prompt_path.stat().st_size > 4096:
-        raise ValueError("test prompt must be an existing file no larger than 4 KiB")
-    prompt = prompt_path.read_text(encoding="utf-8").strip()
-    if not 1 <= len(prompt) <= 2000:
-        raise ValueError("test prompt length must be 1..2000")
+    prompt = read_pilot_prompt(prompt_file)
     check = LocalWireSchemas(schema_root, selections=selections)
     thread = thread_start_params(model=model, cwd=str(working))
     turn = turn_start_params(

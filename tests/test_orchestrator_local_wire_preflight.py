@@ -113,3 +113,14 @@ def test_wrong_bundle_or_missing_prompt_is_rejected(ready):
         preflight.preview_local_one_turn(
             folder, scratch, prompt, model="selected", effort="medium", selections=names,
         )
+
+
+def test_shared_prompt_reader_rejects_relative_and_missing_paths(ready):
+    from chatgpt_web2api.orchestrator.local_pilot_messages import read_pilot_prompt
+
+    root, scratch, prompt, names = ready
+    with pytest.raises(ValueError, match="absolute"):
+        read_pilot_prompt("relative-prompt.txt")
+    prompt.unlink()
+    with pytest.raises(ValueError, match="prompt"):
+        read_pilot_prompt(prompt)
