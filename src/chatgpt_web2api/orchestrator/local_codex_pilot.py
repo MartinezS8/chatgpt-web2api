@@ -18,6 +18,7 @@ from pathlib import Path
 from .local_codex_discovery import _pairs_no_duplicates, discover_local_codex
 from .local_pilot_doctor import local_pilot_doctor
 from .local_pilot_messages import read_pilot_prompt, thread_start_params, turn_start_params
+from .pilot_repeat_guard import reserve_local_pilot_once
 from .local_wire_schema import LocalWireSchemas
 from .storage_hardening import reject_reparse_path
 
@@ -307,6 +308,11 @@ def run_one_local_pilot(
     process = None
     wire = None
     try:
+        reserve_local_pilot_once(
+            receipt_dir=receipts, cwd=root, model_slug=wire_model, effort=effort,
+            prompt_sha256=hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
+            codex_binary_sha256=doctor["binary_sha256"],
+        )
         process = subprocess.Popen(
             [str(exe), "app-server"], cwd=str(root),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -352,6 +358,7 @@ def run_one_local_pilot(
             "intent_sha256": intent_sha,
             "production_finalization_permitted": False,
             "codex_version": doctor["codex_version"],
+            "local_replay_reservation_recorded": True,
             "selected_catalog_id": model,
             "effective_model_slug": wire_model,
             "effective_thread_settings_verified": True,
