@@ -373,3 +373,32 @@ def test_completed_turn_without_agent_message_cannot_claim_output_match(context,
     result = _run(context, allow_one_turn=True)
     assert result["assistant_message_observed"] is False
     assert result["assistant_output_matches_expected"] is False
+
+
+def test_keyboard_interrupt_after_send_records_uncertainty(context, monkeypatch):
+    class _InterruptedWire(pilot._OneTurnWire):
+        def wait_terminal(self, **kwargs):
+            raise KeyboardInterrupt("user canceled")
+
+    proc = _FakeProcess(_success_frames())
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: proc)
+    monkeypatch.setattr(pilot, "_OneTurnWire", _InterruptedWire)
+    with pytest.raises(KeyboardInterrupt, match="canceled"):
+        _run(context, allow_one_turn=True)
+    record = json.loads((context[-1] / "quarantine.json").read_text("utf-8"))
+    assert record["turn_start_may_have_been_sent"] is True
+    assert record["retry_permitted"] is False
+
+
+def test_keyboard_interrupt_before_send_records_pre_turn(context, monkeypatch):
+    class _InterruptedWire(pilot._OneTurnWire):
+        def initialized(self):
+            raise KeyboardInterrupt("user canceled before thread")
+
+    proc = _FakeProcess(_success_frames())
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: proc)
+    monkeypatch.setattr(pilot, "_OneTurnWire", _InterruptedWire)
+    with pytest.raises(KeyboardInterrupt):
+        _run(context, allow_one_turn=True)
+    record = json.loads((context[-1] / "quarantine.json").read_text("utf-8"))
+    assert record["turn_start_may_have_been_sent"] is False

@@ -17,8 +17,9 @@ from pathlib import Path
 
 from .local_codex_discovery import _pairs_no_duplicates, discover_local_codex
 from .local_pilot_doctor import local_pilot_doctor
-from .local_pilot_messages import thread_start_params, turn_start_params
+from .local_pilot_messages import read_pilot_prompt, thread_start_params, turn_start_params
 from .local_wire_schema import LocalWireSchemas
+from .storage_hardening import reject_reparse_path
 
 _FRAME_MAX = 64 * 1024
 _EOF = object()
@@ -265,12 +266,11 @@ def run_one_local_pilot(
         raise ValueError("pilot timeout must be 10..180 seconds")
     if any(type(x) is not str or not x.strip() or len(x) > 256 for x in (model, effort)):
         raise ValueError("explicit model and effort are required")
-    prompt_path, root = Path(prompt_file).expanduser(), Path(cwd).expanduser()
-    if not prompt_path.is_file() or prompt_path.stat().st_size > 4096:
-        raise ValueError("prompt file must exist and contain at most 4 KiB")
-    prompt = prompt_path.read_text(encoding="utf-8").strip()
-    if not 1 <= len(prompt) <= 2000:
-        raise ValueError("prompt must be non-empty, at most 2000 characters")
+    root = Path(cwd).expanduser()
+    if not root.is_absolute() or not root.is_dir():
+        raise ValueError("pilot scratch cwd must be an existing absolute directory")
+    reject_reparse_path(root, error_message="pilot cwd traverses reparse path")
+    prompt = read_pilot_prompt(prompt_file)
     # Do not run account discovery until the four chosen wire schemas are
     # present and pinned. Missing selectors are a hard error, not a fallback.
     wire_schemas = LocalWireSchemas(schema_root, selections=schema_selectors)
@@ -352,7 +352,10 @@ def run_one_local_pilot(
         }
         _write_new_json(receipts / "result.json", result)
         return result
-    except Exception as exc:
+    except BaseException as exc:
+        # KeyboardInterrupt/SystemExit also need durable uncertainty receipts.
+        # Hard power loss cannot execute Python handlers: intent-only remains
+        # INCOMPLETE_OR_INTERRUPTED in the read-only receipt doctor.
         turn_attempted = wire is not None and wire._turn_start_attempts > 0
         _write_new_json(receipts / "quarantine.json", {
             "status": ("needs_human_unknown_or_unverified_delivery" if turn_attempted
