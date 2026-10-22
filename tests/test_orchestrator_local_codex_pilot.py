@@ -436,7 +436,7 @@ def test_model_slug_is_sent_not_picker_id(context, monkeypatch):
     proc = _FakeProcess(frames)
     monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: proc)
     result = _run(context, allow_one_turn=True)
-    outgoing = [json.loads(l) for l in proc.stdin.getvalue().splitlines()]
+    outgoing = [json.loads(line) for line in proc.stdin.getvalue().splitlines()]
     thread = next(x for x in outgoing if x["method"] == "thread/start")
     turn = next(x for x in outgoing if x["method"] == "turn/start")
     assert thread["params"]["model"] == "actual-slug"

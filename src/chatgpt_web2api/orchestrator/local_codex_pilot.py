@@ -18,8 +18,8 @@ from pathlib import Path
 from .local_codex_discovery import _pairs_no_duplicates, discover_local_codex
 from .local_pilot_doctor import local_pilot_doctor
 from .local_pilot_messages import read_pilot_prompt, thread_start_params, turn_start_params
-from .pilot_repeat_guard import reserve_local_pilot_once
 from .local_wire_schema import LocalWireSchemas
+from .pilot_repeat_guard import reserve_local_pilot_once
 from .storage_hardening import reject_reparse_path
 
 _FRAME_MAX = 64 * 1024

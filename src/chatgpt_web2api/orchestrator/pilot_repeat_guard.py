@@ -7,10 +7,10 @@ Only called after --allow-one-turn. Conservative policy: no auto-replay.
 from __future__ import annotations
 
 import hashlib
-from contextlib import closing
 import json
 import os
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from .storage_hardening import reject_reparse_path
