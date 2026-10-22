@@ -83,8 +83,10 @@ def context(tmp_path, monkeypatch):
     cwd.mkdir()
     _FakeProcess._test_cwd = cwd
     receipt = tmp_path / "first-attempt"
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     monkeypatch.setattr(pilot, "local_pilot_doctor", lambda *a, **kw: {
         "codex_version": "codex-cli fixture",
+        "binary_sha256": "a" * 64,
     })
     monkeypatch.setattr(pilot, "discover_local_codex", lambda *a, **kw: {
         "account_present": True,
@@ -450,3 +452,19 @@ def test_text_incompatible_model_is_rejected(context, monkeypatch):
     })
     with pytest.raises(ValueError, match="does not support text"):
         _run(context, allow_one_turn=True)
+
+
+def test_new_receipt_dir_cannot_replay_same_one_turn_under_same_user(context, monkeypatch):
+    first = _FakeProcess(_success_frames())
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: first)
+    result = _run(context, allow_one_turn=True)
+    assert result["local_replay_reservation_recorded"] is True
+    exe, schemas, cwd, prompt, original_receipt = context
+    new_ctx = (exe, schemas, cwd, prompt, original_receipt.with_name("other-receipt"))
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: pytest.fail(
+        "repeat launch must not reach provider"))
+    with pytest.raises(PermissionError, match="already recorded"):
+        _run(new_ctx, allow_one_turn=True)
+    q = json.loads((new_ctx[-1] / "quarantine.json").read_text(encoding="utf-8"))
+    assert q["turn_start_may_have_been_sent"] is False
+    assert q["retry_permitted"] is False
