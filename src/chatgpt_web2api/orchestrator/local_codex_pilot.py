@@ -282,13 +282,22 @@ def run_one_local_pilot(
     offered = discover_local_codex(
         executable, schema_root, root, allow_account_discovery=True,
     )
-    if not any(
-        entry["id"] == model and effort in entry["supported_efforts"]
-        for entry in offered["models"]
-    ):
+    choices = [
+        entry for entry in offered["models"]
+        if entry["id"] == model and effort in entry["supported_efforts"]
+    ]
+    if len(choices) != 1:
         raise ValueError("live pilot model/effort not in account catalog")
+    selection = choices[0]
+    if selection.get("hidden") is True or selection.get("supports_text") is False:
+        raise ValueError("selected model is hidden or does not support text input")
     if not offered["account_present"]:
         raise ValueError("Codex account is not logged in")
+    if offered.get("account_mode") != "chatgpt":
+        raise PermissionError("manual hobby pilot requires explicit ChatGPT login, not API-key billing")
+    wire_model = selection.get("model_slug", model)
+    if not isinstance(wire_model, str) or not wire_model:
+        raise ValueError("catalog model slug is invalid")
     exe = Path(executable).expanduser()
     receipts = Path(receipt_dir).expanduser()
     _create_intent(receipts, prompt=prompt, model=model, effort=effort, cwd=root)
@@ -308,17 +317,17 @@ def run_one_local_pilot(
         if not isinstance(hello.get("userAgent"), str):
             raise RuntimeError("app-server initialize result invalid")
         wire.initialized()
-        thread_params = thread_start_params(model=model, cwd=str(root))
+        thread_params = thread_start_params(model=wire_model, cwd=str(root))
         wire_schemas.require("thread_params", thread_params)
         thread_response = wire.rpc(2, "thread/start", thread_params)
         wire_schemas.require("thread_result", thread_response)
-        _verify_effective_thread_settings(thread_response, model=model, cwd=root)
+        _verify_effective_thread_settings(thread_response, model=wire_model, cwd=root)
         thread = thread_response.get("thread")
         if not isinstance(thread, dict) or not isinstance(thread.get("id"), str):
             raise RuntimeError("thread/start did not return a thread id")
         thread_id = thread["id"]
         turn_params = turn_start_params(
-            thread_id=thread_id, prompt=prompt, model=model, effort=effort, cwd=str(root),
+            thread_id=thread_id, prompt=prompt, model=wire_model, effort=effort, cwd=str(root),
         )
         wire_schemas.require("turn_params", turn_params)
         response = wire.rpc(3, "turn/start", turn_params)
@@ -339,6 +348,8 @@ def run_one_local_pilot(
             "retry_permitted": False,
             "production_finalization_permitted": False,
             "codex_version": doctor["codex_version"],
+            "selected_catalog_id": model,
+            "effective_model_slug": wire_model,
             "effective_thread_settings_verified": True,
             "assistant_message_observed": answer is not None,
             "assistant_output_sha256": (

@@ -145,3 +145,25 @@ def test_unexpected_or_malformed_frame_is_not_ignored(discovery_files, monkeypat
     monkeypatch.setattr(discovery.subprocess, "Popen", lambda *a, **kw: p)
     with pytest.raises(RuntimeError, match="malformed"):
         discovery.discover_local_codex(exe, root, cwd, allow_account_discovery=True)
+
+
+def test_model_catalog_retains_slug_and_text_modality():
+    from chatgpt_web2api.orchestrator.local_codex_discovery import _model_summary
+
+    item = {"id": "picker-id", "model": "actual-model-slug",
+            "supportedReasoningEfforts": [{"reasoningEffort": "high"}],
+            "defaultReasoningEffort": "high", "hidden": False,
+            "inputModalities": ["text", "image"]}
+    summary = _model_summary(item)
+    assert summary["model_slug"] == "actual-model-slug"
+    assert summary["supports_text"] is True
+    assert summary["model_slug_declared"] is True
+
+
+def test_model_catalog_rejects_invalid_modalities():
+    from chatgpt_web2api.orchestrator.local_codex_discovery import _model_summary
+
+    with pytest.raises(ValueError, match="input modalities"):
+        _model_summary({"id": "other",
+                        "supportedReasoningEfforts": [{"reasoningEffort": "medium"}],
+                        "inputModalities": ["telepathy"]})

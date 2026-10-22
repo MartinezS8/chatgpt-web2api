@@ -150,8 +150,25 @@ def _model_summary(record: Any) -> dict:
     default = record.get("defaultReasoningEffort")
     if default is not None and default not in names:
         raise ValueError("model default effort not offered")
+    slug = record.get("model", mid)
+    if not isinstance(slug, str) or not slug or len(slug) > 256:
+        raise ValueError("model slug is malformed")
+    hidden = record.get("hidden", False)
+    if type(hidden) is not bool:
+        raise ValueError("model hidden visibility flag is malformed")
+    raw_modalities = record.get("inputModalities", ["text", "image"])
+    if (not isinstance(raw_modalities, list) or len(raw_modalities) > 16
+            or any(m not in ("text", "image", "audio") for m in raw_modalities)):
+        raise ValueError("model input modalities malformed")
+    if len(raw_modalities) != len(set(raw_modalities)):
+        raise ValueError("duplicate input modality")
     return {
         "id": mid,
+        "model_slug": slug,
+        "model_slug_declared": "model" in record,
+        "hidden": hidden,
+        "input_modalities": raw_modalities,
+        "supports_text": "text" in raw_modalities,
         "display_name": record.get("displayName") if isinstance(record.get("displayName"), str) else mid,
         "default_effort": default,
         "supported_efforts": names,
@@ -209,6 +226,12 @@ def discover_local_codex(
         auth_type = info.get("type") if isinstance(info, dict) else None
         if auth_type is not None and not isinstance(auth_type, str):
             raise RuntimeError("invalid auth type")
+        account_mode = (
+            "chatgpt" if auth_type == "chatgpt"
+            else "api_key" if auth_type in ("apiKey", "api_key")
+            else "other" if auth_type is not None
+            else "none"
+        )
         models = []
         seen_ids = set()
         cursor = None
@@ -222,6 +245,8 @@ def discover_local_codex(
                 raise RuntimeError("invalid or excessive model list")
             for item in data:
                 summary = _model_summary(item)
+                if summary["hidden"]:
+                    raise RuntimeError("model/list includeHidden=false returned hidden model")
                 if summary["id"] in seen_ids:
                     raise RuntimeError("duplicate model id across pages")
                 seen_ids.add(summary["id"])
@@ -240,6 +265,8 @@ def discover_local_codex(
             "binary_sha256": receipt["codex_binary_sha256"],
             "account_present": info is not None,
             "account_type": auth_type,
+            "account_mode": account_mode,
+            "api_key_billing_possible": account_mode == "api_key",
             "requires_openai_auth": account["requiresOpenaiAuth"],
             "models": models,
             "model_count": len(models),
