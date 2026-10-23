@@ -1,6 +1,41 @@
 # Orchestrator Phase 48b–48c Readiness Report
 
-## Current readiness update (2026-10-23)
+## Supplemental readiness update after PR #76 (2026-10-23)
+
+### PR #77 local doctor correction
+
+The local branch `codex/orchestrator-v74-pilot-doctor-account-mode` is based directly on the confirmed PR #76 head `f757c639de3ddac8de792a1c0e9f9b1feefce110`. Its code commit is `efc9c5b2f125c79ee0648fddf1b8965fd5dcfc66` (`fix: expose sanitized Codex account mode`). It is published as open Draft [PR #77](https://github.com/MartinezS8/chatgpt-web2api/pull/77), stacked on PR #76; the PR head at the first CI run was `cb5ec768ed2cd13f05a43b5490912fab74544edc`.
+
+The pilot doctor now exposes only the validated `account_mode` enum alongside the existing presence flag. It rejects malformed or inconsistent account presence/mode data, including missing values, unsupported modes, and `account_present`/mode mismatches. It does not return account payloads, credentials, identifiers, or protocol frames. The regression test first failed on the missing field, then the focused suite passed: **12 passed**; Ruff passed on both changed Python files.
+
+The exact committed code SHA passed the local Windows/CPython 3.12.10 strict verifier with `W2A_E2E_RUN=0`:
+
+```text
+python scripts/verify_orchestrator.py --full --strict --expected-sha efc9c5b2f125c79ee0648fddf1b8965fd5dcfc66 --timeout 1200
+exit=0; compileall=0 (1.58s); pytest=0 (769.92s); ruff=0 (0.58s)
+strict_preflight=true; sha_matched=true; postflight_ok=true
+worktree_clean_at_start=true; worktree_clean_at_end=true
+```
+
+The verifier was run without `--diagnostics`, so its receipt does not expose the aggregate pytest count; no count is inferred here. It records `mode=full-non-e2e`, `skipped_checks=[]`, `network_isolation_verified=false`, and `live_provider_capabilities_verified=false`. This is a local, unattested result, not hosted CI or evidence of live provider use.
+
+On this corrected source, the read-only local doctor reported `account_present=true`, `account_mode=chatgpt`, seven visible models, and verified the exact catalog entry `gpt-6-luna` with effort `max`. The local schema bundle contained 318 files and passed its audit. No thread or turn was started and no inference occurred. Account details and raw app-server responses are intentionally omitted.
+
+The parent PR #76 remains Draft at exact head `f757c639de3ddac8de792a1c0e9f9b1feefce110`, based on `ffcbfb874cc6cac097c51ff69df1d89b1e87b85c`. Its exact-head GitHub run [39915028322](https://github.com/MartinezS8/chatgpt-web2api/actions/runs/39915028322) completed successfully: full-history Gitleaks, strict Windows/Python 3.12, and external distribution build plus installed CLI/MCP/mock/recovery smokes all passed. Earlier intermediate stack heads had failed or cancelled checks; they are not represented as individually green. The cumulative #76 head is the confirmed green parent.
+
+### PR #77 exact-head CI
+
+GitHub run [39919316978](https://github.com/MartinezS8/chatgpt-web2api/actions/runs/39919316978) passed all three jobs on PR #77 head `cb5ec768ed2cd13f05a43b5490912fab74544edc`:
+
+- Full-history Gitleaks 8.21.2 passed; the receipt identifies the exact head and verified scan archive.
+- Strict Windows/Python 3.12.10 passed in 18m44s: 1,545 passed, 2 skipped, 20 subtests passed; 31 live E2E tests were deselected. Compileall, Ruff, exact SHA, clean pre/post worktree, and strict pre/postflight checks passed.
+- External distribution job passed: wheel and sdist built, the wheel installed in a fresh environment, installed CLI/MCP help and capabilities ran, and the installed-wheel five-worker synthetic demo plus crash-recovery and read-only MCP checks completed successfully.
+
+These receipts are for the code and report commit `cb5ec768...`; a subsequent report-only correction is tracked separately and must be checked at its resulting head. Hosted CI remains Windows/Python 3.12 diagnostic evidence, not Linux/macOS coverage, a live provider test, or a production approval.
+
+The operator has no authorized restricted Windows test context and directed that the live gate remain blocked. Same-user hostile TOCTOU remains `FAIL`; effective second-user ACL denial remains `NOT TESTED`. No real worker operation is authorized or technically cleared by the doctor change. Phase 48c remains `PARTIAL`, Phase 48d remains `BLOCKED`, and Gates 49–51 remain unproven.
+
+## Prior readiness snapshot before PR #76 report-only revision (2026-10-23)
 
 The latest checked stack is open and Draft: [PR #76](https://github.com/MartinezS8/chatgpt-web2api/pull/76), branch `codex/orchestrator-v73-ci-ruff-repair`, exact head `c931addcada718d9815d5280d1650d2a987fd0df`, based on PR #75 head `ffcbfb874cc6cac097c51ff69df1d89b1e87b85c`. This is a Ruff/test-fixture repair stacked after the prior fake app-server and durable-ledger work; it does not add live transport authorization.
 
