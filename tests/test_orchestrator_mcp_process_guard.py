@@ -7,7 +7,8 @@ import subprocess
 import pytest
 
 from chatgpt_web2api.orchestrator.mcp_process_guard import (
-    parse_mcp_list, verify_mcp_disabled,
+    parse_mcp_list,
+    verify_mcp_disabled,
 )
 
 

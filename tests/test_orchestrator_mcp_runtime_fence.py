@@ -3,9 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from chatgpt_web2api.orchestrator.mcp_runtime_fence import (
-    require_external_tools_disabled,
-)
+from chatgpt_web2api.orchestrator.mcp_runtime_fence import require_external_tools_disabled
 
 
 def test_no_external_tools_is_not_complete_built_in_tool_proof():
