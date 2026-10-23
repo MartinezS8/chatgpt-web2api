@@ -304,7 +304,7 @@ def run_one_local_pilot(
     mcp_policy = verify_mcp_disabled(executable, root, mcp_source_map)
     offered = discover_local_codex(
         executable, schema_root, root, allow_account_discovery=True,
-        startup_args=mcp_policy.args,
+        mcp_source_map=mcp_source_map,
     )
     choices = [
         entry for entry in offered["models"]

@@ -1,8 +1,8 @@
 """Opt-in LOCAL Codex app-server handshake/account/model discovery without turns.
 
 Hobby-friendly one-shot CLI; this is not a worker and has no dispatch API.
-Only fixed initialize, initialized, account/read and model/list frames can be
-written. The local native exe and captured schema bundle are SHA-pinned.
+Only fixed initialize, initialized, MCP/app inspection, account/read and model/list
+frames can be written. The local native exe and captured schema bundle are SHA-pinned.
 Never prints account email, auth tokens, raw server frames, or stderr.
 """
 from __future__ import annotations
@@ -17,12 +17,15 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .mcp_runtime_fence import require_external_tools_disabled
 from .schema_fixture_audit import _digest, verified_bundle
 from .storage_hardening import reject_reparse_path
 
 _MAX_FRAME = 65536
 _MAX_EVENTS = 512
-_ALLOWED_REQUESTS = frozenset({"initialize", "account/read", "model/list"})
+_ALLOWED_REQUESTS = frozenset({
+    "initialize", "mcpServerStatus/list", "app/installed", "account/read", "model/list",
+})
 _ALLOWED_NOTIFICATIONS = frozenset({"initialized"})
 _EOF = object()
 
@@ -179,7 +182,7 @@ def _model_summary(record: Any) -> dict:
 def discover_local_codex(
     executable: str | Path, schema_root: str | Path, cwd: str | Path, *,
     allow_account_discovery: bool = False, response_timeout: int = 15,
-    startup_args: tuple[str, ...] = (),
+    mcp_source_map: str | Path | None = None,
 ) -> dict:
     """Launch a pinned local executable ONLY when account discovery is opted in."""
     if allow_account_discovery is not True:
@@ -204,10 +207,14 @@ def discover_local_codex(
     ).stdout.strip()
     if version != receipt["codex_version"]:
         raise ValueError("Codex version changed since pinned schema generation")
-    if type(startup_args) is not tuple or not all(type(v) is str for v in startup_args):
-        raise ValueError("unverified startup argument shape")
+    # The guard imports this module's strict JSON parser, so load it after module init.
+    if mcp_source_map is None:
+        raise PermissionError("explicit local MCP source map required before account discovery")
+    # The guard imports this module's strict JSON parser, so load it after module initialization.
+    from .mcp_process_guard import verify_mcp_disabled
+    mcp_policy = verify_mcp_disabled(exe, working, mcp_source_map)
     process = subprocess.Popen(
-        [str(exe), *startup_args, "app-server"],
+        [str(exe), *mcp_policy.args, "app-server"],
         cwd=str(working), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL, bufsize=0,
     )
@@ -220,7 +227,12 @@ def discover_local_codex(
         if not isinstance(hello.get("userAgent"), str):
             raise RuntimeError("Codex initialization response not recognized")
         session.notification("initialized", {})
-        account = session.request(2, "account/read", {"refreshToken": False})
+        mcp_status = session.request(
+            2, "mcpServerStatus/list", {"limit": 100, "detail": "toolsAndAuthOnly"},
+        )
+        installed_apps = session.request(3, "app/installed", {"forceRefresh": False})
+        tool_state = require_external_tools_disabled(mcp_status, installed_apps)
+        account = session.request(4, "account/read", {"refreshToken": False})
         info = account.get("account")
         if info is not None and not isinstance(info, dict):
             raise RuntimeError("Codex account response malformed")
@@ -242,7 +254,7 @@ def discover_local_codex(
             params = {"limit": 100, "includeHidden": False}
             if cursor is not None:
                 params["cursor"] = cursor
-            response = session.request(3 + index, "model/list", params)
+            response = session.request(5 + index, "model/list", params)
             data = response.get("data")
             if not isinstance(data, list) or len(data) > 100:
                 raise RuntimeError("invalid or excessive model list")
@@ -277,6 +289,7 @@ def discover_local_codex(
             "thread_started": False,
             "turn_started": False,
             "provider_inference_performed": False,
+            **tool_state,
         }
     finally:
         # EOF is the documented local stdio lifecycle, never an RPC shutdown.
