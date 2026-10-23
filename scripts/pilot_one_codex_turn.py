@@ -24,6 +24,10 @@ def main() -> int:
     parser.add_argument("--thread-result-schema", required=True)
     parser.add_argument("--turn-params-schema", required=True)
     parser.add_argument("--turn-result-schema", required=True)
+    parser.add_argument("--mcp-source-map", required=True,
+                        help="Operator-reviewed metadata-only MCP provenance map")
+    parser.add_argument("--allow-readonly-builtin-tools", action="store_true",
+                        help="Acknowledge unproven built-in read-only tool absence")
     parser.add_argument("--allow-one-turn", action="store_true",
                         help="Explicitly authorize exactly one account-backed turn")
     args = parser.parse_args()
@@ -36,6 +40,8 @@ def main() -> int:
             "turn_params": args.turn_params_schema,
             "turn_result": args.turn_result_schema,
         },
+        mcp_source_map=args.mcp_source_map,
+        allow_readonly_builtin_tools=args.allow_readonly_builtin_tools,
         allow_one_turn=args.allow_one_turn, timeout=args.timeout,
     )
     print(json.dumps(result, indent=2, sort_keys=True))

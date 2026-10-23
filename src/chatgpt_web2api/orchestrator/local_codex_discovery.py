@@ -179,6 +179,7 @@ def _model_summary(record: Any) -> dict:
 def discover_local_codex(
     executable: str | Path, schema_root: str | Path, cwd: str | Path, *,
     allow_account_discovery: bool = False, response_timeout: int = 15,
+    startup_args: tuple[str, ...] = (),
 ) -> dict:
     """Launch a pinned local executable ONLY when account discovery is opted in."""
     if allow_account_discovery is not True:
@@ -203,8 +204,10 @@ def discover_local_codex(
     ).stdout.strip()
     if version != receipt["codex_version"]:
         raise ValueError("Codex version changed since pinned schema generation")
+    if type(startup_args) is not tuple or not all(type(v) is str for v in startup_args):
+        raise ValueError("unverified startup argument shape")
     process = subprocess.Popen(
-        [str(exe), "app-server"],
+        [str(exe), *startup_args, "app-server"],
         cwd=str(working), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL, bufsize=0,
     )

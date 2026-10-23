@@ -8,6 +8,7 @@ import json
 import pytest
 
 import chatgpt_web2api.orchestrator.local_codex_pilot as pilot
+from chatgpt_web2api.orchestrator.mcp_process_guard import VerifiedMcpArgs
 
 
 class _RetainStdin(io.BytesIO):
@@ -24,6 +25,12 @@ class _FakeProcess:
                     and isinstance(frame.get("result"), dict)
                     and frame["result"].get("cwd") == "__TEST_CWD__"):
                 frame["result"]["cwd"] = str(self._test_cwd)
+        if any(isinstance(f, dict) and f.get("id") == 2 for f in data):
+            data = list(data)
+            data[1:1] = [
+                {"id": 4, "result": {"data": [], "nextCursor": None}},
+                {"id": 5, "result": {"apps": []}},
+            ]
         self.stdin = _RetainStdin()
         self.stdout = io.BytesIO(b"".join(
             (json.dumps(frame) + "\n").encode("utf-8")
@@ -84,6 +91,10 @@ def context(tmp_path, monkeypatch):
     _FakeProcess._test_cwd = cwd
     receipt = tmp_path / "first-attempt"
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
+    (cwd / "mcp-sources.json").write_text('{"schema_version":1,"servers":[]}',
+                                          encoding="utf-8")
+    monkeypatch.setattr(pilot, "verify_mcp_disabled",
+                        lambda *a, **kw: VerifiedMcpArgs((), 0, 0, 0))
     monkeypatch.setattr(pilot, "local_pilot_doctor", lambda *a, **kw: {
         "codex_version": "codex-cli fixture",
         "binary_sha256": "a" * 64,
@@ -107,7 +118,10 @@ def _run(ctx, **kwargs):
             "thread_result": "ThreadStartResponse.json",
             "turn_params": "TurnStartParams.json",
             "turn_result": "TurnStartResponse.json",
-        }, **kwargs,
+        },
+        mcp_source_map=cwd / "mcp-sources.json",
+        allow_readonly_builtin_tools=True,
+        **kwargs,
     )
 
 
@@ -143,7 +157,8 @@ def test_single_completed_turn_durable_receipts(context, monkeypatch):
     result = _run(context, allow_one_turn=True)
     messages = [json.loads(s) for s in process.stdin.getvalue().splitlines()]
     assert [m["method"] for m in messages] == [
-        "initialize", "initialized", "thread/start", "turn/start",
+        "initialize", "initialized", "mcpServerStatus/list", "app/installed",
+        "thread/start", "turn/start",
     ]
     assert messages[-1]["params"]["sandboxPolicy"] == {"type": "readOnly"}
     assert messages[-1]["params"]["approvalPolicy"] == "never"
@@ -206,7 +221,8 @@ def test_schema_mismatch_in_thread_result_prevents_turn_start(context, monkeypat
         _run(context, allow_one_turn=True)
     outgoing = [json.loads(line) for line in proc.stdin.getvalue().splitlines()]
     assert [item["method"] for item in outgoing] == [
-        "initialize", "initialized", "thread/start",
+        "initialize", "initialized", "mcpServerStatus/list", "app/installed",
+        "thread/start",
     ]
     assert (context[-1] / "quarantine.json").exists()
 
@@ -229,7 +245,8 @@ def test_schema_mismatch_in_turn_params_prevents_turn_start(context, monkeypatch
         _run(context, allow_one_turn=True)
     outgoing = [json.loads(line) for line in proc.stdin.getvalue().splitlines()]
     assert [item["method"] for item in outgoing] == [
-        "initialize", "initialized", "thread/start",
+        "initialize", "initialized", "mcpServerStatus/list", "app/installed",
+        "thread/start",
     ]
     assert (context[-1] / "quarantine.json").exists()
 
@@ -505,3 +522,55 @@ def test_new_receipt_dir_cannot_replay_same_one_turn_under_same_user(context, mo
     q = json.loads((new_ctx[-1] / "quarantine.json").read_text(encoding="utf-8"))
     assert q["turn_start_may_have_been_sent"] is False
     assert q["retry_permitted"] is False
+
+
+def test_missing_mcp_manifest_fails_before_any_account_process(context, monkeypatch):
+    exe, root, cwd, prompt, receipt = context
+    monkeypatch.setattr(pilot, "discover_local_codex", lambda *a, **kw: pytest.fail(
+        "must not discover account without MCP policy"))
+    with pytest.raises(PermissionError, match="source map"):
+        pilot.run_one_local_pilot(
+            exe, root, cwd, prompt, receipt, model="available", effort="medium",
+            schema_selectors={
+                "thread_params": "ThreadStartParams.json",
+                "thread_result": "ThreadStartResponse.json",
+                "turn_params": "TurnStartParams.json",
+                "turn_result": "TurnStartResponse.json",
+            }, allow_one_turn=True, allow_readonly_builtin_tools=True,
+        )
+    assert not receipt.exists()
+
+
+def test_mcp_runtime_status_blocks_turn_before_thread(context, monkeypatch):
+    proc = _FakeProcess(_success_frames())
+    frames = [json.loads(line) for line in proc.stdout.getvalue().splitlines()]
+    for frame in frames:
+        if frame.get("id") == 4:
+            frame["result"] = {"data": [{
+                "enabled": True, "tools": [{"name": "unexpected"}],
+            }], "nextCursor": None}
+    proc.stdout = io.BytesIO(b"".join(
+        (json.dumps(row) + "\n").encode("utf-8") for row in frames
+    ))
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: proc)
+    with pytest.raises(PermissionError, match="MCP status"):
+        _run(context, allow_one_turn=True)
+    methods = [json.loads(line)["method"] for line in proc.stdin.getvalue().splitlines()]
+    assert "thread/start" not in methods and "turn/start" not in methods
+    assert (context[-1] / "quarantine.json").exists()
+
+
+def test_callable_app_blocks_turn_before_thread(context, monkeypatch):
+    proc = _FakeProcess(_success_frames())
+    frames = [json.loads(line) for line in proc.stdout.getvalue().splitlines()]
+    for frame in frames:
+        if frame.get("id") == 5:
+            frame["result"] = {"apps": [{"enabled": True, "callable": True}]}
+    proc.stdout = io.BytesIO(b"".join(
+        (json.dumps(row) + "\n").encode("utf-8") for row in frames
+    ))
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: proc)
+    with pytest.raises(PermissionError, match="app is callable"):
+        _run(context, allow_one_turn=True)
+    methods = [json.loads(line)["method"] for line in proc.stdin.getvalue().splitlines()]
+    assert "thread/start" not in methods and "turn/start" not in methods

@@ -23,3 +23,21 @@ py -3.12 scripts/audit_codex_mcp_config.py --codex-exe "<PINNED_EXE>" --cwd "<EM
 See #78 for metadata-only map shape. Never commit local server names, transport
 commands, URLs, auth tokens or process environment. This first commit is
 offline-only and leaves all real provider operations blocked.
+
+
+## Mandatory integration completed
+
+The manual pilot Python API and CLI now require a reviewed `--mcp-source-map`
+and a separate `--allow-readonly-builtin-tools` acknowledgement. The latter
+does NOT prove built-in tools absent, and should only be used when the owner
+explicitly accepts the local read-only hobby context. The actual code now
+runs `verify_mcp_disabled` before account discovery, passes the exact same
+leaf overrides to BOTH account-discovery and first-turn app servers, then
+uses `mcpServerStatus/list` and `app/installed` on the actual pilot
+app-server BEFORE emitting any `thread/start`. Unknown/active tools fail
+closed without a turn, and create an ambiguous/pre-turn diagnostic receipt
+without auto retries. Old unguarded CLI use is removed.
+
+The current parser is intentionally strict. If the installed alpha reports
+different MCP status fields, Codex must validate its schema and update the
+parser plus negative fixtures. This must never be replaced by a bypass flag.

@@ -19,12 +19,17 @@ from .local_codex_discovery import _pairs_no_duplicates, discover_local_codex
 from .local_pilot_doctor import local_pilot_doctor
 from .local_pilot_messages import read_pilot_prompt, thread_start_params, turn_start_params
 from .local_wire_schema import LocalWireSchemas
+from .mcp_process_guard import verify_mcp_disabled
+from .mcp_runtime_fence import require_external_tools_disabled
 from .pilot_repeat_guard import reserve_local_pilot_once
 from .storage_hardening import reject_reparse_path
 
 _FRAME_MAX = 64 * 1024
 _EOF = object()
-_WIRE_METHODS = frozenset({"initialize", "initialized", "thread/start", "turn/start"})
+_WIRE_METHODS = frozenset({
+    "initialize", "initialized", "mcpServerStatus/list", "app/installed",
+    "thread/start", "turn/start",
+})
 
 
 class _OneTurnWire:
@@ -266,6 +271,8 @@ def run_one_local_pilot(
     executable: str | Path, schema_root: str | Path, cwd: str | Path,
     prompt_file: str | Path, receipt_dir: str | Path, *,
     model: str, effort: str, schema_selectors: dict[str, str] | None = None,
+    mcp_source_map: str | Path | None = None,
+    allow_readonly_builtin_tools: bool = False,
     allow_one_turn: bool = False, timeout: int = 90,
 ) -> dict:
     """Run ONE explicitly allowed local turn; no retry, even on lost ACK."""
@@ -287,9 +294,17 @@ def run_one_local_pilot(
     doctor = local_pilot_doctor(executable, schema_root, root)
     if wire_schemas.codex_version != doctor["codex_version"]:
         raise ValueError("pilot wire schema version differs from pinned executable")
-    # An explicit live-turn opt-in also allows account/model discovery.
+    if mcp_source_map is None:
+        raise PermissionError("explicit local MCP source map required before live operation")
+    if allow_readonly_builtin_tools is not True:
+        raise PermissionError(
+            "explicit acceptance of unverified built-in read-only tool exposure required"
+        )
+    # Two configuration-only reads: fail before any local app-server or account.
+    mcp_policy = verify_mcp_disabled(executable, root, mcp_source_map)
     offered = discover_local_codex(
         executable, schema_root, root, allow_account_discovery=True,
+        startup_args=mcp_policy.args,
     )
     choices = [
         entry for entry in offered["models"]
@@ -321,7 +336,7 @@ def run_one_local_pilot(
             codex_binary_sha256=doctor["binary_sha256"],
         )
         process = subprocess.Popen(
-            [str(exe), "app-server"], cwd=str(root),
+            [str(exe), *mcp_policy.args, "app-server"], cwd=str(root),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, bufsize=0,
         )
@@ -333,6 +348,12 @@ def run_one_local_pilot(
         if not isinstance(hello.get("userAgent"), str):
             raise RuntimeError("app-server initialize result invalid")
         wire.initialized()
+        # Query the very same App Server that will later submit the turn.
+        mcp_status = wire.rpc(
+            4, "mcpServerStatus/list", {"limit": 100, "detail": "toolsAndAuthOnly"},
+        )
+        installed_apps = wire.rpc(5, "app/installed", {"forceRefresh": False})
+        external_tool_state = require_external_tools_disabled(mcp_status, installed_apps)
         thread_params = thread_start_params(model=wire_model, cwd=str(root))
         wire_schemas.require("thread_params", thread_params)
         thread_response = wire.rpc(2, "thread/start", thread_params)
@@ -366,6 +387,9 @@ def run_one_local_pilot(
             "production_finalization_permitted": False,
             "codex_version": doctor["codex_version"],
             "local_replay_reservation_recorded": True,
+            "mcp_process_config_verified": True,
+            "external_tool_state": external_tool_state,
+            "builtin_readonly_tool_exposure_acknowledged": True,
             "selected_catalog_id": model,
             "effective_model_slug": wire_model,
             "effective_thread_settings_verified": True,
