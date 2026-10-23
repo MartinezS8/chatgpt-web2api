@@ -50,6 +50,7 @@ def local_pilot_doctor(
         "schema_pinned": True,
         "account_discovery_performed": False,
         "account_present": None,
+        "account_mode": None,
         "model_verified": False,
         "selected_model": model,
         "selected_effort": effort,
@@ -64,7 +65,18 @@ def local_pilot_doctor(
         exe, schema_root, work, allow_account_discovery=True,
     )
     report["account_discovery_performed"] = True
-    report["account_present"] = discovery["account_present"]
+    account_present = discovery.get("account_present")
+    if type(account_present) is not bool:
+        raise RuntimeError("Codex discovery returned invalid account presence")
+    report["account_present"] = account_present
+    account_mode = discovery.get("account_mode")
+    if (type(account_mode) is not str
+            or account_mode not in {"chatgpt", "api_key", "other", "none"}):
+        raise RuntimeError("Codex discovery returned an invalid account mode")
+    if ((account_present and account_mode == "none")
+            or (not account_present and account_mode != "none")):
+        raise RuntimeError("Codex discovery account presence and mode disagree")
+    report["account_mode"] = account_mode
     report["available_models"] = discovery["models"]
     if model is None:
         report["next_action"] = "Select --model and --effort from available_models"

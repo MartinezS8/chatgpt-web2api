@@ -54,6 +54,7 @@ def test_opt_in_account_catalog_is_checked_not_guessed(pinned, monkeypatch):
         calls.append(kwargs)
         return {
             "account_present": True,
+            "account_mode": "chatgpt",
             "models": [
                 {"id": "offered-model", "supported_efforts": ["low", "medium"]},
             ],
@@ -65,6 +66,9 @@ def test_opt_in_account_catalog_is_checked_not_guessed(pinned, monkeypatch):
     )
     assert calls == [{"allow_account_discovery": True}]
     assert result["model_verified"] is True
+    assert result["account_present"] is True
+    assert result["account_mode"] == "chatgpt"
+    assert "account_type" not in result
     assert result["first_live_turn_authorized"] is False
     assert result["first_live_turn_started"] is False
     assert result["selected_model"] == "offered-model"
@@ -74,6 +78,7 @@ def test_unavailable_model_and_effort_fail_closed(pinned, monkeypatch):
     exe, folder, cwd = pinned
     monkeypatch.setattr(doctor, "discover_local_codex", lambda *args, **kw: {
         "account_present": True,
+        "account_mode": "chatgpt",
         "models": [{"id": "real", "supported_efforts": ["medium"]}],
     })
     for model, effort in [("invented", "medium"), ("real", "very-high")]:
@@ -96,6 +101,7 @@ def test_catalog_without_selection_does_not_use_server_default(pinned, monkeypat
     exe, folder, cwd = pinned
     monkeypatch.setattr(doctor, "discover_local_codex", lambda *args, **kw: {
         "account_present": True,
+        "account_mode": "chatgpt",
         "models": [{"id": "real", "supported_efforts": ["medium"],
                     "default_effort": "medium"}],
     })
@@ -103,6 +109,24 @@ def test_catalog_without_selection_does_not_use_server_default(pinned, monkeypat
     assert r["model_verified"] is False
     assert "Select" in r["next_action"]
     assert r["first_live_turn_authorized"] is False
+
+
+@pytest.mark.parametrize(
+    ("account_present", "account_mode"),
+    [("yes", "chatgpt"), (True, None), (True, "apiKey"),
+     (True, {"unexpected": "object"}), (True, "none"), (False, "other")],
+)
+def test_malformed_account_classification_fails_closed(
+    pinned, monkeypatch, account_present, account_mode
+):
+    exe, folder, cwd = pinned
+    monkeypatch.setattr(doctor, "discover_local_codex", lambda *args, **kw: {
+        "account_present": account_present,
+        "account_mode": account_mode,
+        "models": [],
+    })
+    with pytest.raises(RuntimeError, match="Codex discovery"):
+        doctor.local_pilot_doctor(exe, folder, cwd, allow_account_discovery=True)
 
 
 def test_mutated_bin_rejects_discovery_and_pilot(pinned, monkeypatch):
