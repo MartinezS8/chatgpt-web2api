@@ -18,6 +18,7 @@ from .storage_hardening import reject_reparse_path
 def local_pilot_doctor(
     executable: str | Path, schema_root: str | Path, cwd: str | Path, *,
     allow_account_discovery: bool = False,
+    mcp_source_map: str | Path | None = None,
     model: str | None = None, effort: str | None = None,
 ) -> dict:
     """Return a minimal machine-readable receipt; never a send permission."""
@@ -61,8 +62,11 @@ def local_pilot_doctor(
     if not allow_account_discovery:
         report["next_action"] = "Run again with --allow-account-discovery after user consent"
         return report
+    if mcp_source_map is None:
+        raise PermissionError("explicit local MCP source map required before account discovery")
     discovery = discover_local_codex(
         exe, schema_root, work, allow_account_discovery=True,
+        mcp_source_map=mcp_source_map,
     )
     report["account_discovery_performed"] = True
     account_present = discovery.get("account_present")

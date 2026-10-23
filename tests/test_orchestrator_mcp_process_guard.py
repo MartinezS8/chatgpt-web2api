@@ -22,13 +22,13 @@ def env(tmp_path, monkeypatch):
     calls = []
     first = [
         {"name": "from-file", "enabled": True, "transport": "stdio"},
-        {"name": "from cli", "enabled": True, "transport": "streamable_http"},
+        {"name": "from_cli", "enabled": True, "transport": "streamable_http"},
         {"name": "plugin_server", "enabled": True, "transport": "stdio"},
         {"name": "already-disabled", "enabled": False, "transport": "stdio"},
     ]
     provenance = [
         {"name": "from-file", "source": "user_config"},
-        {"name": "from cli", "source": "cli"},
+        {"name": "from_cli", "source": "cli"},
         {"name": "plugin_server", "source": "plugin", "plugin_id": "sample@marketplace"},
         {"name": "already-disabled", "source": "user_config"},
     ]
@@ -60,11 +60,38 @@ def test_mixed_sources_only_leaf_overrides_preserve_transport(env):
     assert len(calls) == 2
     args = calls[1]
     assert all("mcp_servers={" not in flag for flag in args)
-    assert 'mcp_servers."from-file".enabled=false' in args
-    assert 'mcp_servers."from cli".enabled=false' in args
-    assert 'plugins."sample@marketplace".mcp_servers."plugin_server".enabled=false' in args
+    assert "mcp_servers.from-file.enabled=false" in args
+    assert "mcp_servers.from_cli.enabled=false" in args
+    assert "plugins.sample@marketplace.mcp_servers.plugin_server.enabled=false" in args
     assert result.sanitized()["built_in_tools_absent_verified"] is False
     assert result.sanitized()["live_turn_authorized"] is False
+
+
+@pytest.mark.parametrize(
+    ("name", "source"),
+    [
+        ("unsafe.name", {"source": "user_config"}),
+        ("safe_name", {"source": "plugin", "plugin_id": "bad.id@marketplace"}),
+    ],
+)
+def test_unrepresentable_config_identity_fails_before_second_probe(
+    env, monkeypatch, name, source,
+):
+    exe, scratch, source_path, _, _ = env
+    data = {"schema_version": 1, "servers": [{"name": name, **source}]}
+    source_path.write_text(json.dumps(data), encoding="utf-8")
+    inspections = []
+
+    def inspect(*args, **kwargs):
+        inspections.append(args)
+        return {name: True}
+
+    monkeypatch.setattr(
+        "chatgpt_web2api.orchestrator.mcp_process_guard._inspect", inspect,
+    )
+    with pytest.raises(ValueError, match="safe Codex override"):
+        verify_mcp_disabled(exe, scratch, source_path)
+    assert len(inspections) == 1
 
 
 def test_unknown_source_fails_without_second_config_probe(env):

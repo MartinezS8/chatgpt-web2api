@@ -576,7 +576,7 @@ def test_callable_app_blocks_turn_before_thread(context, monkeypatch):
     assert "thread/start" not in methods and "turn/start" not in methods
 
 
-def test_reviewed_mcp_leaf_flags_shared_by_discovery_and_live_process(
+def test_reviewed_mcp_source_map_reaches_discovery_and_live_process(
     context, monkeypatch,
 ):
     flags = ("-c", 'mcp_servers."sample".enabled=false')
@@ -586,7 +586,7 @@ def test_reviewed_mcp_leaf_flags_shared_by_discovery_and_live_process(
     )
     seen = {}
     def observe_discovery(*a, **kw):
-        seen["discovery_args"] = kw["startup_args"]
+        seen["discovery_source_map"] = kw["mcp_source_map"]
         return {
             "account_present": True, "account_mode": "chatgpt",
             "models": [{"id": "available", "supported_efforts": ["medium"],
@@ -600,7 +600,7 @@ def test_reviewed_mcp_leaf_flags_shared_by_discovery_and_live_process(
     monkeypatch.setattr(pilot, "discover_local_codex", observe_discovery)
     monkeypatch.setattr(pilot.subprocess, "Popen", observe_process)
     result = _run(context, allow_one_turn=True)
-    assert seen["discovery_args"] == flags
+    assert seen["discovery_source_map"] == context[2] / "mcp-sources.json"
     assert seen["pilot_argv"][1:-1] == list(flags)
     assert seen["pilot_argv"][-1] == "app-server"
     assert result["mcp_process_config_verified"] is True

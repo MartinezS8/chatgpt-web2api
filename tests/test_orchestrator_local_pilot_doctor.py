@@ -30,6 +30,9 @@ def pinned(tmp_path, monkeypatch):
         }],
     }
     (folder / "offline-readiness.json").write_text(json.dumps(report), encoding="utf-8")
+    (tmp_path / "mcp-sources.json").write_text(
+        '{"schema_version":1,"servers":[]}', encoding="utf-8",
+    )
     monkeypatch.setattr(doctor.subprocess, "run", lambda args, **kwargs:
                         subprocess.CompletedProcess(args, 0, stdout="codex-cli 0.test\n"))
     return executable, folder, tmp_path
@@ -45,6 +48,14 @@ def test_offline_readiness_does_not_discover_or_send(pinned, monkeypatch):
     assert result["model_verified"] is False
     assert result["account_discovery_performed"] is False
     assert result["first_live_turn_authorized"] is False
+
+
+def test_account_discovery_opt_in_requires_mcp_source_map(pinned, monkeypatch):
+    exe, folder, cwd = pinned
+    monkeypatch.setattr(doctor, "discover_local_codex", lambda *a, **kw: pytest.fail(
+        "discovery must not launch without a source map"))
+    with pytest.raises(PermissionError, match="MCP source map"):
+        doctor.local_pilot_doctor(exe, folder, cwd, allow_account_discovery=True)
 
 
 def test_opt_in_account_catalog_is_checked_not_guessed(pinned, monkeypatch):
@@ -63,8 +74,10 @@ def test_opt_in_account_catalog_is_checked_not_guessed(pinned, monkeypatch):
     result = doctor.local_pilot_doctor(
         exe, folder, cwd, allow_account_discovery=True,
         model="offered-model", effort="medium",
+        mcp_source_map=cwd / "mcp-sources.json",
     )
-    assert calls == [{"allow_account_discovery": True}]
+    assert calls == [{"allow_account_discovery": True,
+                      "mcp_source_map": cwd / "mcp-sources.json"}]
     assert result["model_verified"] is True
     assert result["account_present"] is True
     assert result["account_mode"] == "chatgpt"
@@ -86,6 +99,7 @@ def test_unavailable_model_and_effort_fail_closed(pinned, monkeypatch):
             doctor.local_pilot_doctor(
                 exe, folder, cwd, allow_account_discovery=True,
                 model=model, effort=effort,
+                mcp_source_map=cwd / "mcp-sources.json",
             )
 
 
@@ -105,7 +119,10 @@ def test_catalog_without_selection_does_not_use_server_default(pinned, monkeypat
         "models": [{"id": "real", "supported_efforts": ["medium"],
                     "default_effort": "medium"}],
     })
-    r = doctor.local_pilot_doctor(exe, folder, cwd, allow_account_discovery=True)
+    r = doctor.local_pilot_doctor(
+        exe, folder, cwd, allow_account_discovery=True,
+        mcp_source_map=cwd / "mcp-sources.json",
+    )
     assert r["model_verified"] is False
     assert "Select" in r["next_action"]
     assert r["first_live_turn_authorized"] is False
@@ -126,7 +143,10 @@ def test_malformed_account_classification_fails_closed(
         "models": [],
     })
     with pytest.raises(RuntimeError, match="Codex discovery"):
-        doctor.local_pilot_doctor(exe, folder, cwd, allow_account_discovery=True)
+        doctor.local_pilot_doctor(
+            exe, folder, cwd, allow_account_discovery=True,
+            mcp_source_map=cwd / "mcp-sources.json",
+        )
 
 
 def test_mutated_bin_rejects_discovery_and_pilot(pinned, monkeypatch):
@@ -135,4 +155,7 @@ def test_mutated_bin_rejects_discovery_and_pilot(pinned, monkeypatch):
     monkeypatch.setattr(doctor, "discover_local_codex", lambda *args, **kw: pytest.fail(
         "called after mismatch"))
     with pytest.raises(ValueError, match="binary differs"):
-        doctor.local_pilot_doctor(exe, folder, cwd, allow_account_discovery=True)
+        doctor.local_pilot_doctor(
+            exe, folder, cwd, allow_account_discovery=True,
+            mcp_source_map=cwd / "mcp-sources.json",
+        )
