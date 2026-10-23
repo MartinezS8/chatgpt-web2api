@@ -21,10 +21,22 @@ class _FakeProcess:
 
     def __init__(self, data):
         for frame in data:
-            if (isinstance(frame, dict) and frame.get("id") == 2
-                    and isinstance(frame.get("result"), dict)
-                    and frame["result"].get("cwd") == "__TEST_CWD__"):
-                frame["result"]["cwd"] = str(self._test_cwd)
+            if not isinstance(frame, dict):
+                continue
+            result = frame.get("result")
+            if (frame.get("id") == 2 and isinstance(result, dict)
+                    and result.get("cwd") == "__TEST_CWD__"):
+                result["cwd"] = str(self._test_cwd)
+            if frame.get("id") == 2 and isinstance(result, dict):
+                thread = result.get("thread")
+            elif frame.get("method") == "thread/started":
+                params = frame.get("params")
+                thread = params.get("thread") if isinstance(params, dict) else None
+            else:
+                thread = None
+            if (isinstance(thread, dict)
+                    and thread.get("cwd") == "__TEST_CWD__"):
+                thread["cwd"] = str(self._test_cwd)
         if any(isinstance(f, dict) and f.get("id") == 2 for f in data):
             data = list(data)
             data[1:1] = [
@@ -59,10 +71,19 @@ def context(tmp_path, monkeypatch):
             "properties": {"sandbox": {"const": "read-only"}},
         },
         "ThreadStartResponse.json": {
-            "type": "object", "required": ["thread"],
+            "type": "object",
+            "required": [
+                "approvalPolicy", "approvalsReviewer", "cwd", "model",
+                "modelProvider", "sandbox", "thread",
+            ],
             "properties": {"thread": {
-                "type": "object", "required": ["id", "source"],
-                "properties": {"source": {"const": "synthetic"}}}},
+                "type": "object",
+                "required": [
+                    "cliVersion", "createdAt", "cwd", "ephemeral", "id",
+                    "modelProvider", "preview", "projectId", "sessionId",
+                    "source", "status", "turns", "updatedAt",
+                ],
+                "properties": {"source": {"const": "appServer"}}}},
         },
         "TurnStartParams.json": {
             "type": "object", "required": ["threadId", "input"],
@@ -70,7 +91,9 @@ def context(tmp_path, monkeypatch):
         },
         "TurnStartResponse.json": {
             "type": "object", "required": ["turn"],
-            "properties": {"turn": {"type": "object"}},
+            "properties": {"turn": {
+                "type": "object", "required": ["id", "items", "status"],
+            }},
         },
     }
     manifest = []
@@ -125,21 +148,43 @@ def _run(ctx, **kwargs):
     )
 
 
+def _synthetic_thread():
+    return {
+        "cliVersion": "codex-cli fixture",
+        "createdAt": 1730910000,
+        "cwd": "__TEST_CWD__",
+        "ephemeral": False,
+        "id": "thread-x",
+        "modelProvider": "openai",
+        "preview": "",
+        "projectId": None,
+        "sessionId": "thread-x",
+        "source": "appServer",
+        "status": {"type": "idle"},
+        "turns": [],
+        "updatedAt": 1730910000,
+    }
+
+
 def _success_frames():
     return [
         {"id": 1, "result": {"userAgent": "codex fixture"}},
-        {"method": "thread/started", "params": {"thread": {"id": "thread-x"}}},
-        {"id": 2, "result": {"thread": {
-            "id": "thread-x", "sessionId": "thread-x", "source": "synthetic"},
+        {"method": "thread/started", "params": {"thread": _synthetic_thread()}},
+        {"id": 2, "result": {
+            "thread": _synthetic_thread(),
             "model": "available", "approvalPolicy": "never",
-            "sandbox": {"type": "readOnly"}, "cwd": "__TEST_CWD__"}},
+            "approvalsReviewer": "user", "modelProvider": "openai",
+            "sandbox": {"type": "readOnly", "networkAccess": False},
+            "cwd": "__TEST_CWD__",
+        }},
         {"method": "turn/started", "params": {
             "threadId": "thread-x", "turnId": "turn-x",
-            "turn": {"id": "turn-x", "status": "inProgress"}}},
-        {"id": 3, "result": {"turn": {"id": "turn-x", "status": "inProgress"}}},
+            "turn": {"id": "turn-x", "items": [], "status": "inProgress"}}},
+        {"id": 3, "result": {"turn": {
+            "id": "turn-x", "items": [], "status": "inProgress"}}},
         {"method": "turn/completed", "params": {
             "threadId": "thread-x",
-            "turn": {"id": "turn-x", "status": "completed"}}},
+            "turn": {"id": "turn-x", "items": [], "status": "completed"}}},
     ]
 
 
@@ -309,7 +354,7 @@ def test_turn_started_before_thread_ack_is_protocol_error(context, monkeypatch):
     frames.insert(2, {
         "method": "turn/started",
         "params": {"threadId": "thread-x", "turn": {
-            "id": "turn-x", "status": "inProgress",
+            "id": "turn-x", "items": [], "status": "inProgress",
         }},
     })
     proc = _FakeProcess(frames)
@@ -337,6 +382,7 @@ def test_final_agent_output_is_verified_separately_from_transport(context, monke
     frames = _success_frames()
     frames.insert(-1, {
         "method": "item/completed", "params": {
+            "completedAtMs": 1730910000000,
             "threadId": "thread-x", "turnId": "turn-x",
             "item": {"id": "item-x", "type": "agentMessage",
                      "phase": "final_answer", "text": "ORCH_TEST_OK"},
@@ -353,9 +399,10 @@ def test_completed_turn_with_wrong_text_is_not_output_verified(context, monkeypa
     frames = _success_frames()
     frames.insert(-1, {
         "method": "item/completed", "params": {
+            "completedAtMs": 1730910000000,
             "threadId": "thread-x", "turnId": "turn-x",
-            "item": {"type": "agentMessage", "phase": "final_answer",
-                     "text": "NOT_THE_EXPECTED_TEXT"},
+            "item": {"id": "item-x", "type": "agentMessage",
+                     "phase": "final_answer", "text": "NOT_THE_EXPECTED_TEXT"},
         },
     })
     monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: _FakeProcess(frames))
@@ -420,8 +467,9 @@ def test_effective_read_only_policy_rejects_network_or_unknown_fields(
 def test_model_reroute_is_not_accepted_as_success(context, monkeypatch):
     frames = _success_frames()
     frames.insert(-1, {"method": "model/rerouted", "params": {
+        "threadId": "thread-x", "turnId": "turn-x",
         "fromModel": "available", "toModel": "different",
-        "reason": "capacity",
+        "reason": "highRiskCyberActivity",
     }})
     monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: _FakeProcess(frames))
     with pytest.raises(RuntimeError, match="rerouting"):
