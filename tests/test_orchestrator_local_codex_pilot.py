@@ -574,3 +574,54 @@ def test_callable_app_blocks_turn_before_thread(context, monkeypatch):
         _run(context, allow_one_turn=True)
     methods = [json.loads(line)["method"] for line in proc.stdin.getvalue().splitlines()]
     assert "thread/start" not in methods and "turn/start" not in methods
+
+
+def test_reviewed_mcp_leaf_flags_shared_by_discovery_and_live_process(
+    context, monkeypatch,
+):
+    flags = ("-c", 'mcp_servers."sample".enabled=false')
+    monkeypatch.setattr(
+        pilot, "verify_mcp_disabled",
+        lambda *a, **kw: VerifiedMcpArgs(flags, 1, 1, 0),
+    )
+    seen = {}
+    def observe_discovery(*a, **kw):
+        seen["discovery_args"] = kw["startup_args"]
+        return {
+            "account_present": True, "account_mode": "chatgpt",
+            "models": [{"id": "available", "supported_efforts": ["medium"],
+                        "model_slug": "available", "supports_text": True}],
+        }
+
+    def observe_process(argv, **kwargs):
+        seen["pilot_argv"] = argv
+        return _FakeProcess(_success_frames())
+
+    monkeypatch.setattr(pilot, "discover_local_codex", observe_discovery)
+    monkeypatch.setattr(pilot.subprocess, "Popen", observe_process)
+    result = _run(context, allow_one_turn=True)
+    assert seen["discovery_args"] == flags
+    assert seen["pilot_argv"][1:-1] == list(flags)
+    assert seen["pilot_argv"][-1] == "app-server"
+    assert result["mcp_process_config_verified"] is True
+    assert result["external_tool_state"]["strict_zero_tools_verified"] is False
+
+
+def test_explicit_builtin_tool_acknowledgement_is_separate_from_turn_permission(
+    context, monkeypatch,
+):
+    exe, schemas, cwd, prompt, receipt = context
+    monkeypatch.setattr(pilot, "discover_local_codex", lambda *a, **kw: pytest.fail(
+        "account access before built-in risk acknowledgement"))
+    with pytest.raises(PermissionError, match="read-only tool exposure"):
+        pilot.run_one_local_pilot(
+            exe, schemas, cwd, prompt, receipt, model="available", effort="medium",
+            schema_selectors={
+                "thread_params": "ThreadStartParams.json",
+                "thread_result": "ThreadStartResponse.json",
+                "turn_params": "TurnStartParams.json",
+                "turn_result": "TurnStartResponse.json",
+            },
+            mcp_source_map=cwd / "mcp-sources.json", allow_one_turn=True,
+        )
+    assert not receipt.exists()
