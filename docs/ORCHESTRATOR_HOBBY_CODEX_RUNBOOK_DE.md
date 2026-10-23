@@ -13,7 +13,7 @@ Codex-Turn wurde von ChatGPT ausgeführt. Dieser Leitfaden dient zur
 | 2 | `audit_codex_schema_fixture.py` | rein offline; Schema und Fixture vergleichen |
 | 3 | `orchestrator_pilot_doctor.py` | SHA/Version lokal, kein Accountzugriff |
 | 4 | `codex login` / `codex login status` | Benutzer meldet sich selbst an |
-| 5 | `orchestrator_pilot_doctor.py --allow-account-discovery` | App Server, `account/read`, `model/list` |
+| 5 | `orchestrator_pilot_doctor.py --allow-account-discovery --mcp-source-map ...` | App-Server, `account/read`, `model/list`; nur nach Prüfung aller MCP-Herkünfte |
 | 6 | `pilot_one_codex_turn.py --allow-one-turn` | **ein echter** Thread/Turn (separat bewusst starten) |
 
 Keine der ersten drei Prüfungen startet eine Inferenz. Die vierte ist ein
@@ -37,10 +37,21 @@ py -3.12 scripts/audit_codex_schema_fixture.py --schema-root "$SchemaDir" --list
 
 # Explizit nur einen NEUEN, leeren Testordner anlegen:
 New-Item -ItemType Directory -Path "$Scratch" -ErrorAction Stop
+$McpMap = Join-Path $env:LOCALAPPDATA 'w2a-mcp-source-map-eindeutig.json'
 
 # Nur SHA/Version/Schema prüfen, KEIN account/read:
 py -3.12 scripts/orchestrator_pilot_doctor.py --codex-exe "$CodexExe" --schema-root "$SchemaDir" --cwd "$Scratch"
+
+# Nur Konfigurationsmetadaten inventarisieren; startet keinen MCP-Server.
+py -3.12 scripts/prepare_codex_mcp_source_map.py --codex-exe "$CodexExe" --cwd "$Scratch" --output-map "$McpMap"
 ```
+
+Wenn die Inventarisierung mit Exitcode 2 endet oder `unknown`-Einträge
+enthält, **hier stoppen**. Prüfe lokal die tatsächliche Quelle jedes Eintrags
+(zum Beispiel Benutzer-/Projektkonfiguration, CLI-Override oder Plugin) und
+ergänze nur belegte Zuordnungen; Plugin-Einträge benötigen die exakte
+`plugin_id`. Keine unbekannte Quelle erraten. Die Karte enthält lokale
+Servernamen und gehört weder in Git noch in einen Bericht.
 
 **Wichtig:** Der Schema-Fingerprint aus einer alten Codex-Version darf nicht
 für eine neue Codex.exe wiederverwendet werden. Bei Änderungen Version und
@@ -56,15 +67,16 @@ oder GitHub teilen.
 
 ```powershell
 codex login status
-# Nach bewusster Zustimmung zum lokalen account/read / model/list:
-py -3.12 scripts/orchestrator_pilot_doctor.py --codex-exe "$CodexExe" --schema-root "$SchemaDir" --cwd "$Scratch" --allow-account-discovery
+# Nach abgeschlossenem Herkunftsreview und bewusster Zustimmung zu account/read / model/list:
+py -3.12 scripts/audit_codex_mcp_config.py --codex-exe "$CodexExe" --cwd "$Scratch" --mcp-source-map "$McpMap"
+py -3.12 scripts/orchestrator_pilot_doctor.py --codex-exe "$CodexExe" --schema-root "$SchemaDir" --cwd "$Scratch" --allow-account-discovery --mcp-source-map "$McpMap"
 ```
 
 Aus dem Ergebnis den **exakten** Modell-Identifier und eine tatsächlich
 unterstützte Reasoning-Stufe übernehmen. Danach erneut prüfen:
 
 ```powershell
-py -3.12 scripts/orchestrator_pilot_doctor.py --codex-exe "$CodexExe" --schema-root "$SchemaDir" --cwd "$Scratch" --allow-account-discovery --model '<EXAKTE_MODEL_ID>' --effort '<EXAKTE_EFFORT>'
+py -3.12 scripts/orchestrator_pilot_doctor.py --codex-exe "$CodexExe" --schema-root "$SchemaDir" --cwd "$Scratch" --allow-account-discovery --mcp-source-map "$McpMap" --model '<EXAKTE_MODEL_ID>' --effort '<EXAKTE_EFFORT>'
 ```
 
 Mit `model_verified: true` ist **nur** die Auswahl bestätigt – keine
