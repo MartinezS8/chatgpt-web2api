@@ -16,7 +16,7 @@ from .storage_hardening import reject_reparse_path
 
 _MAX_JSON = 256 * 1024
 _ALLOWED_TRANSPORTS = frozenset({"stdio", "streamable_http", "http", "sse"})
-_ALLOWED_SOURCES = frozenset({"user_config", "cli", "plugin"})
+_ALLOWED_SOURCES = frozenset({"user_config", "project_config", "cli", "plugin"})
 
 
 @dataclass(frozen=True)

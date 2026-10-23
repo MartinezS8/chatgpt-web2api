@@ -50,3 +50,8 @@ changes, new OS account, real provider calls, or merges in this PR.
 Relevant upstream context: https://github.com/openai/codex/issues/53087 ;
 https://developers.openai.com/plugins/build/plugins ;
 https://learn.chatgpt.com/docs/app-server
+
+
+The inventory helper in PR #80 supports the additional explicit source
+`project_config` in the source map, using exactly the same
+`mcp_servers.<name>.enabled=false` leaf overrides as `user_config`.
