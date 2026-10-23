@@ -35,16 +35,20 @@ def env(tmp_path, monkeypatch):
     source.write_text(json.dumps({"schema_version": 1, "servers": provenance}), encoding="utf-8")
 
     def cli(argv, **kwargs):
-        assert argv[-3:] == ["mcp", "list", "--json"][-3:]
         assert kwargs["capture_output"] is True
         assert kwargs["timeout"] == 20
         assert "app-server" not in argv and "turn/start" not in argv
         calls.append(argv)
-        if len(calls) == 1:
-            selected = first
+        if argv[-3:] == ["mcp", "list", "--json"]:
+            selected = first if len([x for x in calls if x[-3:] == ["mcp", "list", "--json"]]) == 1 else [
+                {**x, "enabled": False} for x in first
+            ]
+            stdout = json.dumps(selected)
+        elif argv[-2:] == ["features", "list"]:
+            stdout = "Feature Stage State\napps stable false\n"
         else:
-            selected = [{**x, "enabled": False} for x in first]
-        return subprocess.CompletedProcess(argv, 0, stdout=json.dumps(selected), stderr="")
+            pytest.fail("unexpected Codex read-only preflight command")
+        return subprocess.CompletedProcess(argv, 0, stdout=stdout, stderr="")
 
     monkeypatch.setattr(
         "chatgpt_web2api.orchestrator.mcp_process_guard.subprocess.run", cli,
@@ -57,12 +61,15 @@ def test_mixed_sources_only_leaf_overrides_preserve_transport(env):
     result = verify_mcp_disabled(exe, scratch, source)
     assert result.server_count == 4 and result.previously_enabled_count == 3
     assert result.remaining_enabled_count == 0
-    assert len(calls) == 2
+    assert len(calls) == 3
     args = calls[1]
     assert all("mcp_servers={" not in flag for flag in args)
     assert "mcp_servers.from-file.enabled=false" in args
     assert "mcp_servers.from_cli.enabled=false" in args
     assert "plugins.sample@marketplace.mcp_servers.plugin_server.enabled=false" in args
+    assert "features.apps=false" in args
+    assert calls[2][-2:] == ["features", "list"]
+    assert result.sanitized()["apps_feature_disabled_verified"] is True
     assert result.sanitized()["built_in_tools_absent_verified"] is False
     assert result.sanitized()["live_turn_authorized"] is False
 
@@ -156,4 +163,50 @@ def test_config_enumeration_never_starts_server_process(env, monkeypatch):
         lambda *a, **kw: pytest.fail("MCP process launched"),
     )
     verify_mcp_disabled(exe, scratch, source)
-    assert len(calls) == 2
+    assert len(calls) == 3
+
+
+def test_apps_override_not_effective_blocks_before_app_server(env, monkeypatch):
+    exe, scratch, source, calls, _ = env
+    source.write_text('{"schema_version":1,"servers":[]}', encoding="utf-8")
+
+    def cli(argv, **kwargs):
+        calls.append(argv)
+        assert kwargs["capture_output"] is True and kwargs["timeout"] == 20
+        if argv[-3:] == ["mcp", "list", "--json"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="[]", stderr="")
+        if argv[-2:] == ["features", "list"]:
+            return subprocess.CompletedProcess(
+                argv, 0, stdout="Feature Stage State\napps stable true\n", stderr="",
+            )
+        pytest.fail("unexpected Codex preflight command")
+
+    monkeypatch.setattr(
+        "chatgpt_web2api.orchestrator.mcp_process_guard.subprocess.run", cli,
+    )
+    with pytest.raises(PermissionError, match="Apps feature remains enabled"):
+        verify_mcp_disabled(exe, scratch, source)
+    assert any(call[-2:] == ["features", "list"] for call in calls)
+
+
+@pytest.mark.parametrize("feature_output", [
+    "", "apps stable unknown", "apps stable false\napps beta false",
+    "apps stable false\n" + "x" * (64 * 1024 + 1),
+], ids=["empty", "unknown", "duplicate", "too-long"])
+def test_apps_feature_probe_requires_one_bounded_boolean_row(env, monkeypatch, feature_output):
+    exe, scratch, source, calls, _ = env
+    source.write_text('{"schema_version":1,"servers":[]}', encoding="utf-8")
+
+    def cli(argv, **kwargs):
+        calls.append(argv)
+        if argv[-3:] == ["mcp", "list", "--json"]:
+            return subprocess.CompletedProcess(argv, 0, stdout="[]", stderr="")
+        if argv[-2:] == ["features", "list"]:
+            return subprocess.CompletedProcess(argv, 0, stdout=feature_output, stderr="")
+        pytest.fail("unexpected Codex preflight command")
+
+    monkeypatch.setattr(
+        "chatgpt_web2api.orchestrator.mcp_process_guard.subprocess.run", cli,
+    )
+    with pytest.raises((PermissionError, ValueError)):
+        verify_mcp_disabled(exe, scratch, source)

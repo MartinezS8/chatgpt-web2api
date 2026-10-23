@@ -1,8 +1,9 @@
 """Process-scoped, fail-closed Codex MCP configuration verification.
 
-Only calls 'mcp list --json' (configuration introspection). It never starts
-an MCP server, an app-server, a thread, or a turn. A source map must be
-operator-reviewed; this module cannot itself authenticate config provenance.
+Only calls 'mcp list --json' and 'features list' (configuration
+introspection). It never starts an MCP server, an app-server, a thread, or a
+turn. A source map must be operator-reviewed; this module cannot itself
+authenticate config provenance.
 """
 from __future__ import annotations
 
@@ -36,6 +37,7 @@ class VerifiedMcpArgs:
             "mcp_servers_initially_enabled": self.previously_enabled_count,
             "mcp_servers_remaining_enabled": self.remaining_enabled_count,
             "process_scoped_only": True,
+            "apps_feature_disabled_verified": True,
             "effective_app_server_mcp_checked": False,
             "built_in_tools_absent_verified": False,
             "live_turn_authorized": False,
@@ -155,11 +157,39 @@ def _inspect(exe: Path, cwd: Path, flags: tuple[str, ...], timeout: int) -> dict
     return parse_mcp_list(proc.stdout)
 
 
+def _inspect_apps_disabled(
+    exe: Path, cwd: Path, flags: tuple[str, ...], timeout: int,
+) -> None:
+    """Require Codex's effective process-scoped Apps feature to be false."""
+    try:
+        proc = subprocess.run(
+            [str(exe), *flags, "features", "list"],
+            cwd=str(cwd), capture_output=True, text=True,
+            timeout=timeout, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise RuntimeError("Codex Apps feature probe could not finish") from exc
+    if proc.returncode != 0:
+        raise RuntimeError("Codex Apps feature policy could not be verified")
+    if type(proc.stdout) is not str or len(proc.stdout) > 64 * 1024:
+        raise ValueError("Codex Apps feature output is missing or excessive")
+    rows = []
+    for line in proc.stdout.splitlines():
+        fields = line.split()
+        if fields and fields[0] == "apps":
+            rows.append(fields)
+    if (len(rows) != 1 or len(rows[0]) != 3
+            or rows[0][2] not in {"true", "false"}):
+        raise ValueError("Codex Apps feature state is missing or malformed")
+    if rows[0][2] != "false":
+        raise PermissionError("Codex Apps feature remains enabled after process override")
+
+
 def verify_mcp_disabled(
     executable: str | Path, cwd: str | Path, source_map: str | Path, *,
     timeout: int = 20,
 ) -> VerifiedMcpArgs:
-    """Two configuration-only CLI reads. Never call the provider."""
+    """Verify process-local MCP and Apps disablement without starting a server."""
     exe, root = Path(executable).expanduser(), Path(cwd).expanduser()
     if not exe.is_absolute() or not exe.is_file() or exe.suffix.lower() != ".exe":
         raise ValueError("explicit existing native Codex EXE required")
@@ -170,8 +200,9 @@ def verify_mcp_disabled(
     reject_reparse_path(exe, error_message="Codex binary traverses reparse path")
     reject_reparse_path(root, error_message="scratch traverses reparse path")
     before = _inspect(exe, root, (), timeout)
-    flags = _source_map(source_map, before)
+    flags = (*_source_map(source_map, before), "-c", "features.apps=false")
     after = _inspect(exe, root, flags, timeout)
     if any(after.values()) or any(after.get(name, False) for name in before):
         raise PermissionError("Codex MCPs remain enabled after process overrides")
+    _inspect_apps_disabled(exe, root, flags, timeout)
     return VerifiedMcpArgs(flags, len(before), sum(before.values()), 0)

@@ -69,7 +69,8 @@ def discovery_files(tmp_path, monkeypatch):
     monkeypatch.setattr(
         mcp_process_guard, "verify_mcp_disabled",
         lambda *a, **kw: SimpleNamespace(
-            args=("-c", 'mcp_servers."fixture".enabled=false'),
+            args=("-c", 'mcp_servers."fixture".enabled=false',
+                  "-c", "features.apps=false"),
         ),
     )
     return exe, root, tmp_path
@@ -79,8 +80,8 @@ def _lines(**overrides):
     base = [
         {"id": 1, "result": {"userAgent": "Codex test", "platformOs": "windows"}},
         {"method": "account/updated", "params": {"email": "never-log@example.com"}},
-        {"id": 2, "result": {"data": [], "nextCursor": None}},
-        {"id": 3, "result": {"apps": []}},
+        {"id": 2, "result": {"apps": []}},
+        {"id": 3, "result": {"data": [], "nextCursor": None}},
         {"id": 4, "result": {
             "account": {"type": "chatgpt", "email": "secret@example.com",
                         "accessToken": "never-return-me"},
@@ -104,6 +105,35 @@ def _discover(exe, root, cwd, **kwargs):
     return discovery.discover_local_codex(
         exe, root, cwd, mcp_source_map=cwd / "mcp-sources.json", **kwargs,
     )
+
+
+def test_session_accepts_bounded_large_server_frames():
+    payload = "x" * 70_000
+    process = _FakeProcess([{"id": 1, "result": {"payload": payload}}])
+    session = discovery._DiscoverySession(process, timeout=1)
+
+    assert session.request(1, "initialize", {})["payload"] == payload
+
+
+def test_session_rejects_server_frames_above_response_bound():
+    oversized = (
+        b'{"id":1,"result":{"payload":"'
+        + b"x" * (4 * 1024 * 1024)
+        + b'"}}\n'
+    )
+    process = _FakeProcess([oversized])
+    session = discovery._DiscoverySession(process, timeout=1)
+
+    with pytest.raises(RuntimeError, match="app-server frame exceeded limit"):
+        session.request(1, "initialize", {})
+
+
+def test_session_keeps_outbound_request_limit():
+    process = _FakeProcess([])
+    session = discovery._DiscoverySession(process, timeout=1)
+
+    with pytest.raises(ValueError, match="discovery request too large"):
+        session.request(1, "initialize", {"padding": "x" * 65_536})
 
 
 def test_explicit_opt_in_required_before_launch(discovery_files, monkeypatch):
@@ -134,11 +164,12 @@ def test_read_only_handshake_and_no_leak_or_turn(discovery_files, monkeypatch):
     report = _discover(exe, root, cwd, allow_account_discovery=True)
     messages = [json.loads(line) for line in p.stdin.getvalue().splitlines()]
     assert [msg["method"] for msg in messages] == [
-        "initialize", "initialized", "mcpServerStatus/list", "app/installed",
+        "initialize", "initialized", "app/installed", "mcpServerStatus/list",
         "account/read", "model/list",
     ]
     assert launch["args"] == [
-        str(exe), "-c", 'mcp_servers."fixture".enabled=false', "app-server",
+        str(exe), "-c", 'mcp_servers."fixture".enabled=false',
+        "-c", "features.apps=false", "app-server",
     ]
     assert messages[4]["params"] == {"refreshToken": False}
     assert report["mcp_status_checked"] is True
@@ -153,32 +184,38 @@ def test_read_only_handshake_and_no_leak_or_turn(discovery_files, monkeypatch):
 
 def test_active_mcp_state_blocks_account_read(discovery_files, monkeypatch):
     exe, root, cwd = discovery_files
-    frames = _lines(**{"2": {"id": 2, "result": {
-        "data": [{"enabled": True, "tools": [{"name": "synthetic"}]}],
-        "nextCursor": None,
-    }}})
+    frames = _lines(**{
+        "2": {"id": 2, "result": {"apps": []}},
+        "3": {"id": 3, "result": {
+            "data": [{
+                "name": "synthetic", "authStatus": "unsupported",
+                "resourceTemplates": [], "resources": [],
+                "tools": {"synthetic": {"name": "synthetic"}},
+            }], "nextCursor": None,
+        }},
+    })
     process = _FakeProcess(frames)
     monkeypatch.setattr(discovery.subprocess, "Popen", lambda *a, **kw: process)
     with pytest.raises(PermissionError, match="MCP status"):
         _discover(exe, root, cwd, allow_account_discovery=True)
     sent = [json.loads(line) for line in process.stdin.getvalue().splitlines()]
     assert [message["method"] for message in sent] == [
-        "initialize", "initialized", "mcpServerStatus/list", "app/installed",
+        "initialize", "initialized", "app/installed", "mcpServerStatus/list",
     ]
 
 
 def test_callable_app_state_blocks_account_read(discovery_files, monkeypatch):
     exe, root, cwd = discovery_files
-    frames = _lines(**{"3": {"id": 3, "result": {
-        "apps": [{"callable": True}],
+    frames = _lines(**{"2": {"id": 2, "result": {
+        "apps": [{"id": "synthetic", "enabled": False, "callable": True}],
     }}})
     process = _FakeProcess(frames)
     monkeypatch.setattr(discovery.subprocess, "Popen", lambda *a, **kw: process)
-    with pytest.raises(PermissionError, match="app is callable"):
+    with pytest.raises(PermissionError, match="app is enabled or callable"):
         _discover(exe, root, cwd, allow_account_discovery=True)
     sent = [json.loads(line) for line in process.stdin.getvalue().splitlines()]
     assert [message["method"] for message in sent] == [
-        "initialize", "initialized", "mcpServerStatus/list", "app/installed",
+        "initialize", "initialized", "app/installed",
     ]
 
 
@@ -209,7 +246,7 @@ def test_server_requests_never_receive_auto_approval(discovery_files, monkeypatc
         _discover(exe, root, cwd, allow_account_discovery=True)
     sent = [json.loads(line) for line in p.stdin.getvalue().splitlines()]
     assert [m["method"] for m in sent] == [
-        "initialize", "initialized", "mcpServerStatus/list",
+        "initialize", "initialized", "app/installed",
     ]
 
 

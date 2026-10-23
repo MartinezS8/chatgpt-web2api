@@ -17,11 +17,13 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .mcp_runtime_fence import require_external_tools_disabled
+from .mcp_runtime_fence import check_installed_apps, require_external_tools_disabled
 from .schema_fixture_audit import _digest, verified_bundle
 from .storage_hardening import reject_reparse_path
 
-_MAX_FRAME = 65536
+_MAX_REQUEST_FRAME = 65536
+_MAX_RESPONSE_FRAME = 4 * 1024 * 1024
+_MAX_QUEUED_FRAMES = 16
 _MAX_EVENTS = 512
 _ALLOWED_REQUESTS = frozenset({
     "initialize", "mcpServerStatus/list", "app/installed", "account/read", "model/list",
@@ -45,7 +47,7 @@ class _DiscoverySession:
             raise RuntimeError("app-server stdio unavailable")
         self._process = process
         self._timeout = timeout
-        self._output = queue.Queue(maxsize=64)
+        self._output = queue.Queue(maxsize=_MAX_QUEUED_FRAMES)
         self._overflow = threading.Event()
         self._read_count = 0
         self._reader = threading.Thread(target=self._read_stdout, daemon=True)
@@ -54,11 +56,11 @@ class _DiscoverySession:
     def _read_stdout(self):
         try:
             while True:
-                line = self._process.stdout.readline(_MAX_FRAME + 1)
+                line = self._process.stdout.readline(_MAX_RESPONSE_FRAME + 1)
                 if not line:
                     self._enqueue(_EOF)
                     return
-                if len(line) > _MAX_FRAME or not line.endswith(b"\n"):
+                if len(line) > _MAX_RESPONSE_FRAME or not line.endswith(b"\n"):
                     self._enqueue(RuntimeError("app-server frame exceeded limit"))
                     return
                 self._enqueue(line)
@@ -80,7 +82,7 @@ class _DiscoverySession:
         ):
             raise PermissionError("discovery refuses requests that can start work")
         encoded = (json.dumps(message, ensure_ascii=True, separators=(",", ":")) + "\n").encode("ascii")
-        if len(encoded) > _MAX_FRAME:
+        if len(encoded) > _MAX_REQUEST_FRAME:
             raise ValueError("discovery request too large")
         try:
             self._process.stdin.write(encoded)
@@ -227,10 +229,13 @@ def discover_local_codex(
         if not isinstance(hello.get("userAgent"), str):
             raise RuntimeError("Codex initialization response not recognized")
         session.notification("initialized", {})
+        # Verify Apps are disabled before status discovery, which may create
+        # temporary MCP connections while collecting tool catalogs.
+        installed_apps = session.request(2, "app/installed", {"forceRefresh": False})
+        check_installed_apps(installed_apps)
         mcp_status = session.request(
-            2, "mcpServerStatus/list", {"limit": 100, "detail": "toolsAndAuthOnly"},
+            3, "mcpServerStatus/list", {"limit": 100, "detail": "toolsAndAuthOnly"},
         )
-        installed_apps = session.request(3, "app/installed", {"forceRefresh": False})
         tool_state = require_external_tools_disabled(mcp_status, installed_apps)
         account = session.request(4, "account/read", {"refreshToken": False})
         info = account.get("account")
