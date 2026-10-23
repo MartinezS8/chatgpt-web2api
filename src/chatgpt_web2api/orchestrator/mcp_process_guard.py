@@ -7,6 +7,7 @@ operator-reviewed; this module cannot itself authenticate config provenance.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -84,6 +85,18 @@ def parse_mcp_list(raw: str) -> dict[str, bool]:
     return result
 
 
+def _config_key_segment(value: str, *, plugin_id: bool = False) -> str:
+    # Codex -c accepts bare config-key segments here; quoted MCP names are
+    # accepted by the CLI but silently do not override these effective entries.
+    pattern = (
+        r"[A-Za-z0-9_-]+(?:@[A-Za-z0-9_-]+)?"
+        if plugin_id else r"[A-Za-z0-9_-]+"
+    )
+    if re.fullmatch(pattern, value) is None:
+        raise ValueError("MCP identity cannot be represented as a safe Codex override")
+    return value
+
+
 def _source_map(path: str | Path, actual: dict[str, bool]) -> tuple[str, ...]:
     file = Path(path).expanduser()
     if not file.is_absolute() or not file.is_file() or file.is_symlink():
@@ -107,20 +120,21 @@ def _source_map(path: str | Path, actual: dict[str, bool]) -> tuple[str, ...]:
         if name in seen or name not in actual or origin not in _ALLOWED_SOURCES:
             raise ValueError("unknown, duplicate or unclassified MCP source")
         seen.add(name)
+        config_name = _config_key_segment(name)
         if origin == "plugin":
             if set(entry) != {"name", "source", "plugin_id"}:
                 raise ValueError("plugin MCP requires exact plugin identity")
-            plugin = _safe_name(entry.get("plugin_id"))
+            plugin = _config_key_segment(_safe_name(entry.get("plugin_id")), plugin_id=True)
             if actual[name]:
                 flags += [
-                    "-c", f"plugins.{json.dumps(plugin)}.mcp_servers.{json.dumps(name)}.enabled=false",
-                    "-c", f"plugins.{json.dumps(plugin)}.enabled=false",
+                    "-c", f"plugins.{plugin}.mcp_servers.{config_name}.enabled=false",
+                    "-c", f"plugins.{plugin}.enabled=false",
                 ]
         else:
             if set(entry) != {"name", "source"}:
                 raise ValueError("regular MCP source must not include plugin metadata")
             if actual[name]:
-                flags += ["-c", f"mcp_servers.{json.dumps(name)}.enabled=false"]
+                flags += ["-c", f"mcp_servers.{config_name}.enabled=false"]
     if seen != set(actual):
         raise ValueError("unclassified MCP server in effective inventory")
     return tuple(flags)
