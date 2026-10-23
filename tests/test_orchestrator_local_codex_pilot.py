@@ -37,11 +37,15 @@ class _FakeProcess:
             if (isinstance(thread, dict)
                     and thread.get("cwd") == "__TEST_CWD__"):
                 thread["cwd"] = str(self._test_cwd)
-        if any(isinstance(f, dict) and f.get("id") == 2 for f in data):
+        supplied_guard_frames = any(
+            isinstance(f, dict) and f.get("id") in {4, 5} for f in data
+        )
+        if (not supplied_guard_frames
+                and any(isinstance(f, dict) and f.get("id") == 2 for f in data)):
             data = list(data)
             data[1:1] = [
-                {"id": 4, "result": {"data": [], "nextCursor": None}},
-                {"id": 5, "result": {"apps": []}},
+                {"id": 4, "result": {"apps": []}},
+                {"id": 5, "result": {"data": [], "nextCursor": None}},
             ]
         self.stdin = _RetainStdin()
         self.stdout = io.BytesIO(b"".join(
@@ -117,7 +121,9 @@ def context(tmp_path, monkeypatch):
     (cwd / "mcp-sources.json").write_text('{"schema_version":1,"servers":[]}',
                                           encoding="utf-8")
     monkeypatch.setattr(pilot, "verify_mcp_disabled",
-                        lambda *a, **kw: VerifiedMcpArgs((), 0, 0, 0))
+                        lambda *a, **kw: VerifiedMcpArgs(
+                            ("-c", "features.apps=false"), 0, 0, 0,
+                        ))
     monkeypatch.setattr(pilot, "local_pilot_doctor", lambda *a, **kw: {
         "codex_version": "codex-cli fixture",
         "binary_sha256": "a" * 64,
@@ -188,6 +194,24 @@ def _success_frames():
     ]
 
 
+def test_callable_app_blocks_before_mcp_status_or_thread(context, monkeypatch):
+    process = _FakeProcess(_success_frames())
+    frames = [json.loads(line) for line in process.stdout.getvalue().splitlines()]
+    for frame in frames:
+        if frame.get("id") == 4:
+            frame["result"] = {"apps": [{
+                "id": "synthetic", "enabled": False, "callable": True,
+            }]}
+    process.stdout = io.BytesIO(b"".join(
+        (json.dumps(row) + "\n").encode("utf-8") for row in frames
+    ))
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: process)
+    with pytest.raises(PermissionError, match="app is enabled or callable"):
+        _run(context, allow_one_turn=True)
+    messages = [json.loads(s) for s in process.stdin.getvalue().splitlines()]
+    assert [m["method"] for m in messages] == ["initialize", "initialized", "app/installed"]
+
+
 def test_no_consent_prevents_all_process_activity(context, monkeypatch):
     _, _, _, _, receipt = context
     monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: pytest.fail("spawned"))
@@ -202,7 +226,7 @@ def test_single_completed_turn_durable_receipts(context, monkeypatch):
     result = _run(context, allow_one_turn=True)
     messages = [json.loads(s) for s in process.stdin.getvalue().splitlines()]
     assert [m["method"] for m in messages] == [
-        "initialize", "initialized", "mcpServerStatus/list", "app/installed",
+        "initialize", "initialized", "app/installed", "mcpServerStatus/list",
         "thread/start", "turn/start",
     ]
     assert messages[-1]["params"]["sandboxPolicy"] == {"type": "readOnly"}
@@ -266,7 +290,7 @@ def test_schema_mismatch_in_thread_result_prevents_turn_start(context, monkeypat
         _run(context, allow_one_turn=True)
     outgoing = [json.loads(line) for line in proc.stdin.getvalue().splitlines()]
     assert [item["method"] for item in outgoing] == [
-        "initialize", "initialized", "mcpServerStatus/list", "app/installed",
+        "initialize", "initialized", "app/installed", "mcpServerStatus/list",
         "thread/start",
     ]
     assert (context[-1] / "quarantine.json").exists()
@@ -290,7 +314,7 @@ def test_schema_mismatch_in_turn_params_prevents_turn_start(context, monkeypatch
         _run(context, allow_one_turn=True)
     outgoing = [json.loads(line) for line in proc.stdin.getvalue().splitlines()]
     assert [item["method"] for item in outgoing] == [
-        "initialize", "initialized", "mcpServerStatus/list", "app/installed",
+        "initialize", "initialized", "app/installed", "mcpServerStatus/list",
         "thread/start",
     ]
     assert (context[-1] / "quarantine.json").exists()
@@ -593,9 +617,11 @@ def test_mcp_runtime_status_blocks_turn_before_thread(context, monkeypatch):
     proc = _FakeProcess(_success_frames())
     frames = [json.loads(line) for line in proc.stdout.getvalue().splitlines()]
     for frame in frames:
-        if frame.get("id") == 4:
+        if frame.get("id") == 5:
             frame["result"] = {"data": [{
-                "enabled": True, "tools": [{"name": "unexpected"}],
+                "name": "synthetic", "authStatus": "unsupported",
+                "resourceTemplates": [], "resources": [],
+                "tools": {"unexpected": {"name": "unexpected"}},
             }], "nextCursor": None}
     proc.stdout = io.BytesIO(b"".join(
         (json.dumps(row) + "\n").encode("utf-8") for row in frames
@@ -612,13 +638,15 @@ def test_callable_app_blocks_turn_before_thread(context, monkeypatch):
     proc = _FakeProcess(_success_frames())
     frames = [json.loads(line) for line in proc.stdout.getvalue().splitlines()]
     for frame in frames:
-        if frame.get("id") == 5:
-            frame["result"] = {"apps": [{"enabled": True, "callable": True}]}
+        if frame.get("id") == 4:
+            frame["result"] = {"apps": [{
+                "id": "synthetic", "enabled": True, "callable": True,
+            }]}
     proc.stdout = io.BytesIO(b"".join(
         (json.dumps(row) + "\n").encode("utf-8") for row in frames
     ))
     monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: proc)
-    with pytest.raises(PermissionError, match="app is callable"):
+    with pytest.raises(PermissionError, match="app is enabled or callable"):
         _run(context, allow_one_turn=True)
     methods = [json.loads(line)["method"] for line in proc.stdin.getvalue().splitlines()]
     assert "thread/start" not in methods and "turn/start" not in methods
@@ -627,7 +655,8 @@ def test_callable_app_blocks_turn_before_thread(context, monkeypatch):
 def test_reviewed_mcp_source_map_reaches_discovery_and_live_process(
     context, monkeypatch,
 ):
-    flags = ("-c", 'mcp_servers."sample".enabled=false')
+    flags = ("-c", 'mcp_servers."sample".enabled=false',
+             "-c", "features.apps=false")
     monkeypatch.setattr(
         pilot, "verify_mcp_disabled",
         lambda *a, **kw: VerifiedMcpArgs(flags, 1, 1, 0),

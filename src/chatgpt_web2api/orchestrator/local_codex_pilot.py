@@ -20,7 +20,7 @@ from .local_pilot_doctor import local_pilot_doctor
 from .local_pilot_messages import read_pilot_prompt, thread_start_params, turn_start_params
 from .local_wire_schema import LocalWireSchemas
 from .mcp_process_guard import verify_mcp_disabled
-from .mcp_runtime_fence import require_external_tools_disabled
+from .mcp_runtime_fence import check_installed_apps, require_external_tools_disabled
 from .pilot_repeat_guard import reserve_local_pilot_once
 from .storage_hardening import reject_reparse_path
 
@@ -348,11 +348,13 @@ def run_one_local_pilot(
         if not isinstance(hello.get("userAgent"), str):
             raise RuntimeError("app-server initialize result invalid")
         wire.initialized()
-        # Query the very same App Server that will later submit the turn.
+        # Verify Apps are disabled before status discovery, which may create
+        # temporary MCP connections while collecting tool catalogs.
+        installed_apps = wire.rpc(4, "app/installed", {"forceRefresh": False})
+        check_installed_apps(installed_apps)
         mcp_status = wire.rpc(
-            4, "mcpServerStatus/list", {"limit": 100, "detail": "toolsAndAuthOnly"},
+            5, "mcpServerStatus/list", {"limit": 100, "detail": "toolsAndAuthOnly"},
         )
-        installed_apps = wire.rpc(5, "app/installed", {"forceRefresh": False})
         external_tool_state = require_external_tools_disabled(mcp_status, installed_apps)
         thread_params = thread_start_params(model=wire_model, cwd=str(root))
         wire_schemas.require("thread_params", thread_params)
