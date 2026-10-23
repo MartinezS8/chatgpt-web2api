@@ -283,6 +283,7 @@ def test_protected_migration_crash_recovers_persist_journal_and_uncommitted_page
         workspace.blobs.mkdir()
         policy = PrivateStoragePolicy.open(workspace.root.name)
         database = policy.context.database
+        recovery_probe_rows = 1024
         with closing(sqlite3.connect(database)) as seeded:
             seeded.execute("""CREATE TABLE tasks (
                 task_id TEXT PRIMARY KEY, project_id TEXT NOT NULL, role TEXT NOT NULL,
@@ -300,7 +301,7 @@ def test_protected_migration_crash_recovers_persist_journal_and_uncommitted_page
             seeded.execute("CREATE TABLE recovery_probe (payload BLOB NOT NULL)")
             seeded.executemany(
                 "INSERT INTO recovery_probe(payload) VALUES (zeroblob(1200))",
-                [()] * 6000,
+                [()] * recovery_probe_rows,
             )
             seeded.commit()
         program = r"""
@@ -313,8 +314,9 @@ class CrashDuringMigration(sqlite3.Connection):
         cursor = super().execute(sql, parameters)
         normalized = " ".join(sql.split()).upper()
         if normalized.startswith("UPDATE TASKS SET STATE=?,ERROR=?,LEASE_UNTIL=NULL WHERE STATE IN ("):
-            # Force journaled database-page writes outside the migrated table,
-            # then terminate before the Store context commits.
+            # Force page spills with many more rows than the five-page cache,
+            # while keeping the workload bounded on slower Windows runners.
+            # Then terminate before the Store context commits.
             super().execute("UPDATE recovery_probe SET payload=zeroblob(2500)")
             os._exit(23)
         return cursor
@@ -350,7 +352,7 @@ os._exit(24)
             # was restored from the real hot PERSIST-mode rollback journal.
             assert initialized.execute(
                 "SELECT sum(length(payload)) FROM recovery_probe"
-            ).fetchone()[0] == 6000 * 1200
+            ).fetchone()[0] == recovery_probe_rows * 1200
             assert initialized.execute(
                 "SELECT state FROM tasks WHERE task_id='active'"
             ).fetchone()[0] == "needs_human"

@@ -9,8 +9,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from jsonschema import validators
+
 from .schema_fixture_audit import (
-    _selected_relative, build_local_schema_registry, verified_bundle,
+    _selected_relative,
+    build_local_schema_registry,
+    verified_bundle,
 )
 
 _PHASES = (

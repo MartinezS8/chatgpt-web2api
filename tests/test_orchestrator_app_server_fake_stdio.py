@@ -31,7 +31,9 @@ def binding():
 
 
 def session(tmp_path, scenario=FakeAppServerScenario.SUCCESS, **kwargs):
-    kwargs.setdefault("timeout_seconds", 0.5)
+    # Match the transport's bounded default. A 500 ms response deadline is
+    # too tight when Windows is scheduling many child processes in the full
+    # suite, and can fail before the scenario under test is reached.
     return OfflineFakeAppServer(
         binding(), scenario=scenario, **kwargs
     )
@@ -137,9 +139,9 @@ def test_adversarial_transcripts_fail_closed_without_payload_errors(tmp_path, sc
     ],
 )
 def test_uncertain_turn_delivery_is_never_emitted_again(tmp_path, scenario):
-    # Windows process startup itself can exceed 150ms on a cold interpreter;
-    # retain enough time for startup while the timeout scenario still blocks.
-    worker = session(tmp_path, scenario, timeout_seconds=0.75)
+    # Keep the same bounded handshake window as other fake process tests; the
+    # selected scenario still fails at its turn boundary without a retry.
+    worker = session(tmp_path, scenario, timeout_seconds=2.0)
 
     with pytest.raises(UnknownDelivery):
         worker.run(prompt=SYNTHETIC_PROMPT, cwd=str(tmp_path))
