@@ -1,5 +1,28 @@
 # Orchestrator Phase 48b–48c Readiness Report
 
+## Current readiness update (2026-10-23)
+
+The latest checked stack is open and Draft: [PR #76](https://github.com/MartinezS8/chatgpt-web2api/pull/76), branch `codex/orchestrator-v73-ci-ruff-repair`, exact head `c931addcada718d9815d5280d1650d2a987fd0df`, based on PR #75 head `ffcbfb874cc6cac097c51ff69df1d89b1e87b85c`. This is a Ruff/test-fixture repair stacked after the prior fake app-server and durable-ledger work; it does not add live transport authorization.
+
+The exact-head Windows/Python 3.12 workflow [39875312027](https://github.com/MartinezS8/chatgpt-web2api/actions/runs/39875312027) completed successfully: full-history Gitleaks, strict offline verification (1,539 passed, 2 skipped, 20 subtests passed; 31 E2E tests deselected), Ruff, compileall, exact SHA and clean-worktree checks, plus wheel/sdist build, fresh wheel install, CLI smokes, five-worker mock demo, crash recovery and read-only MCP smoke. CI is developer evidence only. Its strict-verifier receipt explicitly records `network_isolation_verified=false` and `live_provider_capabilities_verified=false`.
+
+Local discovery used the native, Authenticode-valid Codex CLI `0.163.0-alpha.11.1` whose SHA-256 was pinned to the locally generated 318-file schema bundle. Only the read-only `account/read` and `model/list` calls were made after app-server initialization. The account was present; seven visible models were returned; the exact `gpt-6-luna` entry supports text and offers `max`. The doctor verified `gpt-6-luna` plus `max`. No email, token, session key, raw protocol frame or account payload was emitted into the report. No thread or turn was started, and no provider inference occurred.
+
+Using synthetic data only, the locally installed CLI's four selected request/response schemas (`ThreadStartParams`, `ThreadStartResponse`, `TurnStartParams`, `TurnStartResponse`) and four current event schemas (`TurnStartedNotification`, `ItemCompletedNotification`, `TurnCompletedNotification`, `ModelReroutedNotification`) accepted representative fixtures. The synthetic effective-thread gate accepted the exact model, scratch CWD, `approvalPolicy=never`, and read-only sandbox with network disabled. This validates schema and guard compatibility, not a real app-server thread/turn exchange.
+
+The operator has confirmed that no authorized restricted Windows test context is available and asked to keep the live gate blocked. Therefore no real turn was authorized or started. Proposed harmless approval profile, for a later separately approved test only:
+
+- Model / effort: `gpt-6-luna` / `max` (exact catalog values just verified).
+- Scratch: a new, empty `scratch` directory under the external LocalAppData test root; no repository, user files, credentials, or database are in scope.
+- Exact prompt: `Output exactly ORCH_TEST_OK. Do not use tools.`
+- Requested behavior if eventually approved: one turn maximum, read-only sandbox, no tools, no retry on an uncertain send; a completed transport turn would remain unreviewed and would not finalize any task.
+
+Because the worker would run as the same Windows user and no separately authorized restricted context exists, this profile is not sufficient to establish OS isolation. A new explicit approval alone would not clear that isolation blocker. Same-user hostile TOCTOU remains `FAIL`; effective second-user ACL denial remains `NOT TESTED`. Phase 48b offline fake transport is `PASS`; Phase 48c is `PARTIAL`; Phase 48d is `BLOCKED`; real worker, Gates 49–51 and production readiness are not established.
+
+**Current assessment date:** 2026-10-23
+
+---
+
 ## Follow-up assessment after PR #58 (2026-10-22)
 
 The historical assessment below is supplemented by the current validation of
