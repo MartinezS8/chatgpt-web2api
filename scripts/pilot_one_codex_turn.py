@@ -19,6 +19,8 @@ def main() -> int:
     parser.add_argument("--receipt-dir", required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--effort", required=True)
+    parser.add_argument("--windows-sandbox", choices=("mxc", "elevated"), default="mxc",
+                        help="Explicit process-only backend; no automatic fallback (default: mxc)")
     parser.add_argument("--timeout", type=int, default=90)
     parser.add_argument("--thread-params-schema", required=True)
     parser.add_argument("--thread-result-schema", required=True)
@@ -43,6 +45,7 @@ def main() -> int:
         mcp_source_map=args.mcp_source_map,
         allow_readonly_builtin_tools=args.allow_readonly_builtin_tools,
         allow_one_turn=args.allow_one_turn, timeout=args.timeout,
+        windows_sandbox=args.windows_sandbox,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if (

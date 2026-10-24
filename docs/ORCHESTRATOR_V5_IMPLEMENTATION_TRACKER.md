@@ -452,3 +452,23 @@ is implied by branch diagnostics.
 - [ ] P0: No real app-server transport, real worker, or live provider authorization; Phase 48d requires fresh, specific approval and a separately proven sandbox.
 
 See [Phase 48c durable delivery ledger](ORCHESTRATOR_PHASE48C_DURABLE_DELIVERY.md).
+
+## 2026-10-24 — Current MCP inventory and no-turn startup diagnostics
+
+- [x] Refresh the seven-entry local inventory; retain two exact plugin-manifest
+  provenances and reject unrelated redirected cache evidence.
+- [x] Add count-only drift diagnostics, optional v2 binary/CWD/source snapshot
+  binding and post-override inventory consistency checks.
+- [x] Add a bounded startup matrix and a fixed local MXC CWD read using a fresh
+  process-only named read-only permission profile; never provision OS accounts.
+- [x] Verify Temp startup and current ChatGPT account/catalog gpt-6-luna/max
+  without starting a thread or turn.
+- [x] Make the prepared manual pilot request MXC explicitly, disable automatic
+  backend fallback and record that independent backend isolation is unproven.
+- [ ] AppData MXC child CWD mismatch remains **FAIL**; old elevated error 267
+  is not claimed fixed. Hostile same-user TOCTOU remains **FAIL** and effective
+  second-user denial remains **NOT TESTED**.
+- [ ] A real single turn still needs the user's specific permission; catalog,
+  local startup, synthetic tests and CI never grant it.
+
+See [readiness findings, scope and reproducible procedure](ORCHESTRATOR_MCP_REFRESH_READINESS_REPORT.md).

@@ -17,11 +17,19 @@ def main() -> int:
     parser.add_argument("--output-map", required=True)
     parser.add_argument("--user-config")
     parser.add_argument("--project-config")
+    parser.add_argument("--plugin-cache", help="Explicit local plugin cache for manifest provenance")
+    parser.add_argument("--bind-snapshot", action="store_true",
+                        help="Write v2 map bound to binary, CWD, inventory and reviewed source hashes")
     args = parser.parse_args()
-    result = prepare_local_mcp_source_map(
-        args.codex_exe, args.cwd, args.output_map,
-        user_config=args.user_config, project_config=args.project_config,
-    )
+    try:
+        result = prepare_local_mcp_source_map(
+            args.codex_exe, args.cwd, args.output_map,
+            user_config=args.user_config, project_config=args.project_config,
+            plugin_cache=args.plugin_cache, bind_snapshot=args.bind_snapshot,
+        )
+    except (OSError, RuntimeError, ValueError) as exc:
+        print(json.dumps({"ready_for_live_guard": False, "error_type": type(exc).__name__}))
+        return 2
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0 if result["ready_for_live_guard"] else 2
 

@@ -1,8 +1,10 @@
 # Lokaler Hobby-Orchestrator – Codex-Testanleitung (Windows 11)
 
-**Stand:** Draft PR #63 auf der gestapelten Linie #59 → #60 → #61 → #62 → #63.
-Die Python-3.12-Skripte sind implementiert, aber kein echter Account- oder
-Codex-Turn wurde von ChatGPT ausgeführt. Dieser Leitfaden dient zur
+**Stand:** 24. Oktober 2026, Erweiterung auf Basis von Draft PR #84.
+Native Codex 0.164, MCP-/Apps-Fence und Account-/Modell-Discovery wurden lokal
+geprüft. Ein echter Codex-Turn wurde weiterhin nicht ausgeführt. Siehe
+[aktuelle Diagnose und Grenzen](ORCHESTRATOR_MCP_REFRESH_READINESS_REPORT.md).
+Dieser Leitfaden dient zur
 **bewussten manuellen Ausführung auf deinem PC**, nicht als Startfreigabe.
 
 ## Kurzüberblick
@@ -22,14 +24,15 @@ die sechste kann tatsächlich Modellnutzung verursachen.
 
 ## Einrichten und Offline-Checks
 
-In PowerShell, in einem separaten Git-Worktree **der Draft-PR #63**:
+In PowerShell, im geprüften Entwicklungs-Worktree und mit einer externen
+Python-3.12-Umgebung. `$Python` bezeichnet deren absoluten `python.exe`-Pfad.
 
 ```powershell
-py -3.12 -m pip install -e '.[dev]'
+& $Python -m pip install -e '.[dev]'
 # Expliziter Pfad zur vertrauenswürdigen NATIVEN Codex.exe, NICHT codex.cmd:
 $CodexExe = 'C:\voller\pfad\zur\codex.exe'
 $SchemaDir = Join-Path $env:LOCALAPPDATA 'w2a-schema-test-eindeutig'
-$Scratch = Join-Path $env:LOCALAPPDATA 'w2a-leerer-testordner-eindeutig'
+$Scratch = Join-Path $env:TEMP 'w2a-leerer-testordner-eindeutig'
 
 # SchemaDir darf NICHT existieren; Basis LOCALAPPDATA muss existieren.
 py -3.12 scripts/inspect_codex_app_server.py --codex-exe "$CodexExe" --output-dir "$SchemaDir"
@@ -43,7 +46,7 @@ $McpMap = Join-Path $env:LOCALAPPDATA 'w2a-mcp-source-map-eindeutig.json'
 py -3.12 scripts/orchestrator_pilot_doctor.py --codex-exe "$CodexExe" --schema-root "$SchemaDir" --cwd "$Scratch"
 
 # Nur Konfigurationsmetadaten inventarisieren; startet keinen MCP-Server.
-py -3.12 scripts/prepare_codex_mcp_source_map.py --codex-exe "$CodexExe" --cwd "$Scratch" --output-map "$McpMap"
+& $Python scripts/prepare_codex_mcp_source_map.py --codex-exe "$CodexExe" --cwd "$Scratch" --output-map "$McpMap" --plugin-cache (Join-Path $env:USERPROFILE '.codex\plugins\cache') --bind-snapshot
 ```
 
 Wenn die Inventarisierung mit Exitcode 2 endet oder `unknown`-Einträge
@@ -52,6 +55,24 @@ enthält, **hier stoppen**. Prüfe lokal die tatsächliche Quelle jedes Eintrags
 ergänze nur belegte Zuordnungen; Plugin-Einträge benötigen die exakte
 `plugin_id`. Keine unbekannte Quelle erraten. Die Karte enthält lokale
 Servernamen und gehört weder in Git noch in einen Bericht.
+
+Die optionale Plugin-Inventur akzeptiert nur eindeutige aktivierte Plugin-IDs,
+passende Cache-Verzeichnisse und explizite Manifest-Verweise. Mehrdeutige
+Versionen bleiben `unknown`; umgeleitete Kandidaten werden nicht als Beleg
+verwendet. Der v2-Snapshot bindet Binary, Version, CWD, effektive
+Inventarmetadaten und die gelesenen lokalen Quelldateien. Er ist keine
+signierte Herkunftsbescheinigung und erfasst nicht jede Managed-/Remote-Schicht.
+
+```powershell
+# Kein Account, Thread oder Turn. Optional fester PowerShell-CWD-Test unter MXC.
+& $Python scripts/probe_codex_start_matrix.py --codex-exe "$CodexExe" --schema-root "$SchemaDir" --case "$Scratch" "$McpMap" --probe-mxc-command
+```
+
+Für jeden weiteren CWD muss eine eigene v2-Karte erzeugt werden. Ein
+App-Server-Handshake prüft keinen Sandbox-Kindprozess. Der MXC-Test verwendet
+ein neues prozesslokales Read-only-Berechtigungsprofil mit ausgeschaltetem
+Netzwerk; Legacy-Sandbox-Setup mit möglichen Windows-Kontoänderungen wird
+nicht ausgeführt. Ein Exitcode 0 bei abweichendem CWD zählt als Fehler.
 
 **Wichtig:** Der Schema-Fingerprint aus einer alten Codex-Version darf nicht
 für eine neue Codex.exe wiederverwendet werden. Bei Änderungen Version und
@@ -99,8 +120,15 @@ $PromptFile = Join-Path $env:LOCALAPPDATA 'w2a-pilot-prompt-eindeutig.txt'
 $ReceiptDir = Join-Path $env:LOCALAPPDATA 'w2a-pilot-receipt-eindeutig'
 'Output exactly ORCH_TEST_OK. Do not use tools.' | Set-Content -Path "$PromptFile" -Encoding UTF8 -NoNewline
 
-py -3.12 scripts/pilot_one_codex_turn.py --codex-exe "$CodexExe" --schema-root "$SchemaDir" --cwd "$Scratch" --prompt-file "$PromptFile" --receipt-dir "$ReceiptDir" --model '<EXAKTE_MODEL_ID>' --effort '<EXAKTE_EFFORT>' --allow-one-turn
+& $Python scripts/pilot_one_codex_turn.py --codex-exe "$CodexExe" --schema-root "$SchemaDir" --cwd "$Scratch" --prompt-file "$PromptFile" --receipt-dir "$ReceiptDir" --model '<EXAKTE_MODEL_ID>' --effort '<EXAKTE_EFFORT>' --windows-sandbox mxc --mcp-source-map "$McpMap" --thread-params-schema v2/ThreadStartParams.json --thread-result-schema v2/ThreadStartResponse.json --turn-params-schema v2/TurnStartParams.json --turn-result-schema v2/TurnStartResponse.json --allow-readonly-builtin-tools --allow-one-turn
 ```
+
+Die letzten beiden Flags benötigen eine konkrete Freigabe: ein einzelner
+Turn sowie das verbleibende Risiko eingebauter Read-only-Werkzeuge. Derselbe
+Windows-Benutzer und `readOnly` belegen keine Scratch-only-Leseisolation.
+Der Pilot fordert MXC ausdrücklich an und schaltet den automatischen
+Backend-Fallback aus. Der tatsächliche Sandbox-Backend-Prozess eines
+Modell-Toolaufrufs ist damit noch nicht unabhängig bestätigt.
 
 Das Skript erstellt `intent.json` **vor** dem Live-Send. Eine bestätigte
 Transportbeendigung schreibt `result.json` mit Status
