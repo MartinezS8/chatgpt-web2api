@@ -21,6 +21,17 @@ _ALLOWED_TRANSPORTS = frozenset({"stdio", "streamable_http", "http", "sse"})
 _ALLOWED_SOURCES = frozenset({"user_config", "project_config", "cli", "plugin"})
 
 
+class McpInventoryMismatch(ValueError):
+    """Count-only diagnostics safe for ordinary CLI receipts."""
+
+    def __init__(self, *, added: int, removed: int, unresolved: int):
+        self.counts = {"added": added, "removed": removed, "unresolved": unresolved}
+        super().__init__(
+            "MCP source map does not cover exact effective inventory: "
+            f"added={added} removed={removed} unresolved={unresolved}",
+        )
+
+
 @dataclass(frozen=True)
 class VerifiedMcpArgs:
     """Never print args: they contain local server and plugin identifiers."""
@@ -29,6 +40,7 @@ class VerifiedMcpArgs:
     server_count: int
     previously_enabled_count: int
     remaining_enabled_count: int
+    snapshot_verified: bool = False
 
     def sanitized(self) -> dict:
         return {
@@ -41,6 +53,8 @@ class VerifiedMcpArgs:
             "effective_app_server_mcp_checked": False,
             "built_in_tools_absent_verified": False,
             "live_turn_authorized": False,
+            "mcp_snapshot_verified": self.snapshot_verified,
+            "mcp_config_inventory_consistent": True,
         }
 
 
@@ -99,7 +113,7 @@ def _config_key_segment(value: str, *, plugin_id: bool = False) -> str:
     return value
 
 
-def _source_map(path: str | Path, actual: dict[str, bool]) -> tuple[str, ...]:
+def _load_source_map(path: str | Path) -> dict:
     file = Path(path).expanduser()
     if not file.is_absolute() or not file.is_file() or file.is_symlink():
         raise ValueError("existing absolute MCP source map required")
@@ -107,11 +121,30 @@ def _source_map(path: str | Path, actual: dict[str, bool]) -> tuple[str, ...]:
     if not 2 <= file.stat().st_size <= 32 * 1024:
         raise ValueError("MCP source map exceeds strict size limits")
     data = _decode_json(file.read_text(encoding="utf-8"))
-    if (type(data) is not dict or set(data) != {"schema_version", "servers"}
-            or data["schema_version"] != 1 or type(data["servers"]) is not list):
+    if (type(data) is not dict or type(data.get("schema_version")) is not int
+            or data["schema_version"] not in (1, 2)
+            or set(data) != ({"schema_version", "servers", "snapshot"}
+                             if data["schema_version"] == 2 else {"schema_version", "servers"})
+            or type(data["servers"]) is not list or len(data["servers"]) > 128):
         raise ValueError("MCP source map version/structure invalid")
-    if len(data["servers"]) != len(actual):
-        raise ValueError("MCP source map does not cover exact effective inventory")
+    return data
+
+
+def _source_map_flags(data: dict, actual: dict[str, bool]) -> tuple[str, ...]:
+    names = []
+    for entry in data["servers"]:
+        if type(entry) is not dict:
+            raise ValueError("MCP provenance entry must be a JSON object")
+        names.append(_safe_name(entry.get("name")))
+    if len(set(names)) != len(names):
+        raise ValueError("duplicate MCP source identity")
+    expected = set(names)
+    unresolved = sum(entry.get("source") not in _ALLOWED_SOURCES for entry in data["servers"])
+    if expected != set(actual):
+        raise McpInventoryMismatch(
+            added=len(set(actual) - expected), removed=len(expected - set(actual)),
+            unresolved=unresolved,
+        )
     seen: set[str] = set()
     flags: list[str] = []
     for entry in data["servers"]:
@@ -142,6 +175,10 @@ def _source_map(path: str | Path, actual: dict[str, bool]) -> tuple[str, ...]:
     return tuple(flags)
 
 
+def _source_map(path: str | Path, actual: dict[str, bool]) -> tuple[str, ...]:
+    return _source_map_flags(_load_source_map(path), actual)
+
+
 def _inspect(exe: Path, cwd: Path, flags: tuple[str, ...], timeout: int) -> dict[str, bool]:
     try:
         proc = subprocess.run(
@@ -149,8 +186,8 @@ def _inspect(exe: Path, cwd: Path, flags: tuple[str, ...], timeout: int) -> dict
             cwd=str(cwd), capture_output=True, text=True,
             timeout=timeout, check=False,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError("Codex MCP configuration probe could not finish") from exc
+    except (OSError, subprocess.TimeoutExpired):
+        raise RuntimeError("Codex MCP configuration probe could not finish") from None
     if proc.returncode != 0:
         # Do not expose potentially sensitive stderr (transport URL/command).
         raise RuntimeError("Codex MCP configuration rejected the process-scoped policy")
@@ -167,8 +204,8 @@ def _inspect_apps_disabled(
             cwd=str(cwd), capture_output=True, text=True,
             timeout=timeout, check=False,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise RuntimeError("Codex Apps feature probe could not finish") from exc
+    except (OSError, subprocess.TimeoutExpired):
+        raise RuntimeError("Codex Apps feature probe could not finish") from None
     if proc.returncode != 0:
         raise RuntimeError("Codex Apps feature policy could not be verified")
     if type(proc.stdout) is not str or len(proc.stdout) > 64 * 1024:
@@ -200,9 +237,22 @@ def verify_mcp_disabled(
     reject_reparse_path(exe, error_message="Codex binary traverses reparse path")
     reject_reparse_path(root, error_message="scratch traverses reparse path")
     before = _inspect(exe, root, (), timeout)
-    flags = (*_source_map(source_map, before), "-c", "features.apps=false")
+    data = _load_source_map(source_map)
+    snapshot_bound = data["schema_version"] == 2
+    source_flags = _source_map_flags(data, before)
+    if snapshot_bound:
+        from .mcp_config_snapshot import verify_snapshot
+        verify_snapshot(data["snapshot"], exe, root, before)
+    flags = (*source_flags, "-c", "features.apps=false")
     after = _inspect(exe, root, flags, timeout)
+    # A disabled plugin can disappear. Regular entries must remain, and no new
+    # identity (even disabled) may silently enter the effective inventory.
+    plugin_names = {entry["name"] for entry in data["servers"] if entry["source"] == "plugin"}
+    if set(after) - set(before) or (set(before) - set(after)) - plugin_names:
+        raise PermissionError("Codex MCP inventory changed unexpectedly after overrides")
     if any(after.values()) or any(after.get(name, False) for name in before):
         raise PermissionError("Codex MCPs remain enabled after process overrides")
     _inspect_apps_disabled(exe, root, flags, timeout)
-    return VerifiedMcpArgs(flags, len(before), sum(before.values()), 0)
+    if snapshot_bound:
+        verify_snapshot(data["snapshot"], exe, root, before)
+    return VerifiedMcpArgs(flags, len(before), sum(before.values()), 0, snapshot_bound)

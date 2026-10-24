@@ -11,6 +11,13 @@ import chatgpt_web2api.orchestrator.local_codex_pilot as pilot
 from chatgpt_web2api.orchestrator.mcp_process_guard import VerifiedMcpArgs
 
 
+def test_unsupported_backend_rejects_before_account_or_process(context, monkeypatch):
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: pytest.fail("spawned"))
+    monkeypatch.setattr(pilot, "discover_local_codex", lambda *a, **kw: pytest.fail("account read"))
+    with pytest.raises(ValueError, match="no fallback"):
+        _run(context, allow_one_turn=True, windows_sandbox="automatic")
+
+
 class _RetainStdin(io.BytesIO):
     def close(self):
         pass
@@ -678,10 +685,14 @@ def test_reviewed_mcp_source_map_reaches_discovery_and_live_process(
     monkeypatch.setattr(pilot.subprocess, "Popen", observe_process)
     result = _run(context, allow_one_turn=True)
     assert seen["discovery_source_map"] == context[2] / "mcp-sources.json"
-    assert seen["pilot_argv"][1:-1] == list(flags)
+    assert seen["pilot_argv"][1:-1] == [
+        *flags, "-c", 'windows.sandbox="mxc"', "-c", "features.prefer_mxc=false",
+    ]
     assert seen["pilot_argv"][-1] == "app-server"
     assert result["mcp_process_config_verified"] is True
     assert result["external_tool_state"]["strict_zero_tools_verified"] is False
+    assert result["windows_sandbox_requested"] == "mxc"
+    assert json.loads((context[4] / "intent.json").read_text())["windows_sandbox_requested"] == "mxc"
 
 
 def test_explicit_builtin_tool_acknowledgement_is_separate_from_turn_permission(

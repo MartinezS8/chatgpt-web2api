@@ -228,7 +228,9 @@ def _verify_effective_thread_settings(response: dict, *, model: str, cwd: Path) 
 
 
 
-def _create_intent(folder: Path, *, prompt: str, model: str, effort: str, cwd: Path):
+def _create_intent(
+    folder: Path, *, prompt: str, model: str, effort: str, cwd: Path, windows_sandbox: str,
+):
     if not folder.is_absolute() or folder.exists() or not folder.parent.is_dir():
         raise ValueError("receipt directory must be new and have an existing parent")
     folder.mkdir(exist_ok=False)
@@ -236,6 +238,7 @@ def _create_intent(folder: Path, *, prompt: str, model: str, effort: str, cwd: P
         "status": "possible_send_not_yet_verified",
         "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         "model": model, "effort": effort, "cwd": str(cwd),
+        "windows_sandbox_requested": windows_sandbox,
         "max_turn_starts": 1, "retry_permitted": False,
         "created_unix": time.time(),
     }
@@ -274,10 +277,13 @@ def run_one_local_pilot(
     mcp_source_map: str | Path | None = None,
     allow_readonly_builtin_tools: bool = False,
     allow_one_turn: bool = False, timeout: int = 90,
+    windows_sandbox: str = "mxc",
 ) -> dict:
     """Run ONE explicitly allowed local turn; no retry, even on lost ACK."""
     if allow_one_turn is not True:
         raise PermissionError("explicit --allow-one-turn required before any live action")
+    if windows_sandbox not in {"mxc", "elevated"}:
+        raise ValueError("explicit supported Windows sandbox required; no fallback")
     if type(timeout) is not int or not 10 <= timeout <= 180:
         raise ValueError("pilot timeout must be 10..180 seconds")
     if any(type(x) is not str or not x.strip() or len(x) > 256 for x in (model, effort)):
@@ -326,6 +332,7 @@ def run_one_local_pilot(
     receipts = Path(receipt_dir).expanduser()
     intent_sha = _create_intent(
         receipts, prompt=prompt, model=model, effort=effort, cwd=root,
+        windows_sandbox=windows_sandbox,
     )
     process = None
     wire = None
@@ -336,7 +343,8 @@ def run_one_local_pilot(
             codex_binary_sha256=doctor["binary_sha256"],
         )
         process = subprocess.Popen(
-            [str(exe), *mcp_policy.args, "app-server"], cwd=str(root),
+            [str(exe), *mcp_policy.args, "-c", f'windows.sandbox="{windows_sandbox}"',
+             "-c", "features.prefer_mxc=false", "app-server"], cwd=str(root),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL, bufsize=0,
         )
@@ -395,6 +403,8 @@ def run_one_local_pilot(
             "selected_catalog_id": model,
             "effective_model_slug": wire_model,
             "effective_thread_settings_verified": True,
+            "windows_sandbox_requested": windows_sandbox,
+            "sandbox_implementation_independently_verified": False,
             "assistant_message_observed": answer is not None,
             "assistant_output_sha256": (
                 hashlib.sha256(answer.encode("utf-8")).hexdigest()
