@@ -57,6 +57,9 @@ class _OneTurnWire:
         self._frames_seen = 0
         self._turn_start_attempts = 0
         self._final_answers: list[str] = []
+        # Ephemeral hash comparison only; never write arbitrary output bytes
+        # or their digest to the normal result/quarantine receipt.
+        self._final_item_hashes: dict[str, str] = {}
         self._item_type_counts: dict[str, int] = {}
         self._unsafe_notification_counts: dict[str, int] = {}
         self._unexpected_tool_activity = False
@@ -119,6 +122,16 @@ class _OneTurnWire:
                 self._mark_lifecycle_problem("item_snapshot")
             self._snapshot_items[key] = category
         if terminal:
+            for item in items:
+                if (item.get("type") == "agentMessage"
+                        and item.get("phase") in (None, "final_answer")):
+                    body = item.get("text")
+                    expected_hash = self._final_item_hashes.get(item["id"])
+                    if (type(body) is not str or len(body) > 8192
+                            or expected_hash is None
+                            or hashlib.sha256(body.encode("utf-8")).hexdigest()
+                            != expected_hash):
+                        self._mark_lifecycle_problem("item_snapshot")
             # Completed turn snapshots are authoritative for this observed
             # stream; otherwise a missing final item could yield false CLEAN.
             states = {key: typ for key, (typ, status) in self._item_states.items()
@@ -326,6 +339,9 @@ class _OneTurnWire:
                         if len(self._final_answers) >= 8:
                             raise RuntimeError("excessive final agent messages")
                         self._final_answers.append(text)
+                        self._final_item_hashes[item["id"]] = hashlib.sha256(
+                            text.encode("utf-8")
+                        ).hexdigest()
             if method != "turn/completed":
                 if method not in SAFE_NOTIFICATIONS and method not in {
                     "item/started", "item/completed",

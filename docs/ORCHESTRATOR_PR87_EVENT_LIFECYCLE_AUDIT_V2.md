@@ -46,3 +46,10 @@ Terminal `params.turnId` is optional for the pinned protocol shape.
 If supplied, it now must agree with the nested `turn.id` and the
 acknowledged turn ID. A conflicting top-level identifier results in
 quarantine and no retry, even if the nested ID is correct.
+
+
+The terminal `agentMessage.text` is compared against a transient SHA-256 of
+the corresponding completed item, keyed by item ID. Missing or contradictory
+terminal text fails the observed lifecycle check even if a previously received
+final answer equals `ORCH_TEST_OK`. Neither unexpected output nor its digest
+is written to diagnostic receipts.

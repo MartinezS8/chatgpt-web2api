@@ -722,3 +722,39 @@ def test_terminal_matching_explicit_turn_id_is_accepted(context, monkeypatch):
     )
     result = _run(context, allow_one_turn=True)
     assert result["clean_tool_free_pilot"] is True
+
+
+@pytest.mark.parametrize("terminal_text", [
+    "WRONG_TERMINAL_OUTPUT",
+    "",
+    None,
+])
+def test_terminal_agent_text_must_match_completed_agent_event(
+    context, monkeypatch, terminal_text,
+):
+    frames = _success_frames()
+    _add_agent(frames)
+    frames[-1]["params"]["turn"]["items"][0]["text"] = terminal_text
+    monkeypatch.setattr(
+        "chatgpt_web2api.orchestrator.local_codex_pilot.subprocess.Popen",
+        lambda *a, **kw: _FakeProcess(frames),
+    )
+    result = _run(context, allow_one_turn=True)
+    assert result["assistant_output_matches_expected"] is True
+    assert result["clean_tool_free_pilot"] is False
+    assert result["item_lifecycle_consistent"] is False
+    assert result["unexpected_notification_counts"]["item_snapshot"] >= 1
+    receipt = (context[-1] / "result.json").read_text("utf-8")
+    assert "WRONG_TERMINAL_OUTPUT" not in receipt
+
+
+def test_matching_terminal_output_keeps_clean_observation(context, monkeypatch):
+    frames = _success_frames()
+    _add_agent(frames)
+    monkeypatch.setattr(
+        "chatgpt_web2api.orchestrator.local_codex_pilot.subprocess.Popen",
+        lambda *a, **kw: _FakeProcess(frames),
+    )
+    result = _run(context, allow_one_turn=True)
+    assert result["clean_tool_free_pilot"] is True
+    assert result["item_lifecycle_consistent"] is True
