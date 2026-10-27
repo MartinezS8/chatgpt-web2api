@@ -35,7 +35,8 @@ ACTION_NOTIFICATIONS = {
 }
 NOTIFICATION_CATEGORIES = frozenset(ACTION_NOTIFICATIONS.values()) | frozenset({
     "unknown", "malformed_item", "late_item", "late_notification",
-    "item_lifecycle", "item_snapshot", "uncorrelated_notification", "server_request",
+    "item_lifecycle", "item_snapshot", "uncorrelated_notification",
+    "ambiguous_final_answer", "server_request",
 })
 
 

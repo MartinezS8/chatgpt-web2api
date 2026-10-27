@@ -657,3 +657,35 @@ def test_receipt_consistency_rejects_missing_lifecycle_error_flag():
         "clean_tool_free_pilot": False,
     }
     assert result_audit_is_consistent(result) is False
+
+
+def test_earlier_unexpected_final_answer_cannot_be_hidden_by_expected_last_answer(
+    context, monkeypatch,
+):
+    frames = _success_frames()
+    _add_agent(frames, "PRIVATE_PRIOR_FINAL_OUTPUT")
+    frames[-1:-1] = [
+        {"method": "item/started", "params": {
+            "threadId": "thread-x", "turnId": "turn-x",
+            "item": {"id": "second-agent", "type": "agentMessage"},
+        }},
+        {"method": "item/completed", "params": {
+            "threadId": "thread-x", "turnId": "turn-x",
+            "item": {"id": "second-agent", "type": "agentMessage",
+                     "phase": "final_answer", "text": "ORCH_TEST_OK"},
+        }},
+    ]
+    frames[-1]["params"]["turn"]["items"].append({
+        "id": "second-agent", "type": "agentMessage",
+        "phase": "final_answer", "text": "ORCH_TEST_OK",
+    })
+    monkeypatch.setattr(
+        "chatgpt_web2api.orchestrator.local_codex_pilot.subprocess.Popen",
+        lambda *a, **kw: _FakeProcess(frames),
+    )
+    result = _run(context, allow_one_turn=True)
+    assert result["assistant_output_matches_expected"] is True
+    assert result["clean_tool_free_pilot"] is False
+    assert result["unexpected_notification_counts"]["ambiguous_final_answer"] == 1
+    assert "PRIVATE_PRIOR_FINAL_OUTPUT" not in (
+        context[-1] / "result.json").read_text(encoding="utf-8")

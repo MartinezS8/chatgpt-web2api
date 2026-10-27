@@ -264,6 +264,8 @@ class _OneTurnWire:
                     raise RuntimeError("app-server did not stop after terminal event") from None
                 if exit_code != 0:
                     raise RuntimeError("app-server failed after terminal event")
+                if len(self._final_answers) > 1:
+                    self._record_unsafe_notification("ambiguous_final_answer")
                 return terminal_status, (self._final_answers[-1] if self._final_answers else None)
             if "id" in message:
                 raise RuntimeError("unexpected extra app-server RPC result")

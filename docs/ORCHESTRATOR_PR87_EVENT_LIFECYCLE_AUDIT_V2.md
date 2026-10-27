@@ -35,3 +35,8 @@ MCP status, read-only file access and Windows worker-isolation guarantees are
 NOT verified here. Canonical outbox and review ledgers stay mock-only.
 Unknown delivery remains quarantined with **no automatic replay**. A real
 worker and all productive finalization remain BLOCKED.
+
+
+Multiple final agent messages are conservatively marked
+`ambiguous_final_answer`: a correct **last** message cannot conceal an
+earlier unexpected final message and produce a clean pilot receipt.
