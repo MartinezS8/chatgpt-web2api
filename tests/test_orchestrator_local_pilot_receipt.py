@@ -136,3 +136,29 @@ def test_missing_intent_is_not_a_verified_result(tmp_path):
     _write(root, "result.json", _result())
     output = inspect_local_pilot_receipt(root)
     assert output["classification"] == "INCONSISTENT_RECEIPT"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("max_turn_starts", True),
+    ("max_turn_starts", "1"),
+    ("max_turn_starts", 0),
+    ("status", "transport_completed_unreviewed"),
+])
+def test_wrong_intent_contract_never_validates_terminal(receipt_dir, field, value):
+    _write(receipt_dir, "result.json", _result())
+    target = receipt_dir / "intent.json"
+    intent = json.loads(target.read_text(encoding="utf-8"))
+    intent[field] = value
+    _write(receipt_dir, "intent.json", intent)
+    actual = inspect_local_pilot_receipt(receipt_dir)
+    assert actual["classification"] == "INCONSISTENT_RECEIPT"
+    assert actual["production_finalization_permitted"] is False
+
+
+def test_explicit_integer_max_turns_is_required(receipt_dir):
+    _write(receipt_dir, "result.json", _result())
+    intent = json.loads((receipt_dir / "intent.json").read_text(encoding="utf-8"))
+    intent.pop("max_turn_starts")
+    _write(receipt_dir, "intent.json", intent)
+    actual = inspect_local_pilot_receipt(receipt_dir)
+    assert actual["classification"] == "INCONSISTENT_RECEIPT"

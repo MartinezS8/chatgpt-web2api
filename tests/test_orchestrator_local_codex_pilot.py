@@ -295,3 +295,17 @@ def test_nested_foreign_turn_progress_is_rejected(context, monkeypatch):
     receipt = json.loads((context[-1] / "quarantine.json").read_text("utf-8"))
     assert receipt["turn_start_may_have_been_sent"] is True
     assert receipt["retry_permitted"] is False
+
+
+def test_terminal_conflicting_optional_turn_id_is_rejected(context, monkeypatch):
+    frames = _success_frames()
+    frames[-1]["params"]["turnId"] = "foreign-turn"
+    proc = _FakeProcess(frames)
+    monkeypatch.setattr(pilot.subprocess, "Popen", lambda *a, **kw: proc)
+    with pytest.raises(RuntimeError, match="unmatched or malformed"):
+        _run(context, allow_one_turn=True)
+    receipt = json.loads((context[-1] / "quarantine.json").read_text("utf-8"))
+    assert receipt["turn_start_may_have_been_sent"] is True
+    assert receipt["retry_permitted"] is False
+    methods = [json.loads(line)["method"] for line in proc.stdin.getvalue().splitlines()]
+    assert methods.count("turn/start") == 1

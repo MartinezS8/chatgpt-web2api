@@ -167,6 +167,7 @@ class _OneTurnWire:
             params = message.get("params")
             turn = params.get("turn") if isinstance(params, dict) else None
             if (not isinstance(params, dict) or params.get("threadId") != thread_id
+                    or params.get("turnId", turn_id) != turn_id
                     or not isinstance(turn, dict) or turn.get("id") != turn_id
                     or turn.get("status") not in {"completed", "failed", "interrupted"}):
                 raise RuntimeError("unmatched or malformed turn completion")
