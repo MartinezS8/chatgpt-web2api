@@ -124,11 +124,11 @@ class _OneTurnWire:
         if terminal:
             for item in items:
                 if (item.get("type") == "agentMessage"
-                        and item.get("phase") in (None, "final_answer")):
+                        and item["id"] in self._final_item_hashes):
                     body = item.get("text")
-                    expected_hash = self._final_item_hashes.get(item["id"])
-                    if (type(body) is not str or len(body) > 8192
-                            or expected_hash is None
+                    expected_hash = self._final_item_hashes[item["id"]]
+                    if (item.get("phase") not in (None, "final_answer")
+                            or type(body) is not str or len(body) > 8192
                             or hashlib.sha256(body.encode("utf-8")).hexdigest()
                             != expected_hash):
                         self._mark_lifecycle_problem("item_snapshot")

@@ -758,3 +758,18 @@ def test_matching_terminal_output_keeps_clean_observation(context, monkeypatch):
     result = _run(context, allow_one_turn=True)
     assert result["clean_tool_free_pilot"] is True
     assert result["item_lifecycle_consistent"] is True
+
+
+def test_terminal_phase_cannot_reclassify_final_message_as_commentary(
+    context, monkeypatch,
+):
+    frames = _success_frames()
+    _add_agent(frames)
+    frames[-1]["params"]["turn"]["items"][0]["phase"] = "commentary"
+    monkeypatch.setattr(
+        "chatgpt_web2api.orchestrator.local_codex_pilot.subprocess.Popen",
+        lambda *a, **kw: _FakeProcess(frames),
+    )
+    result = _run(context, allow_one_turn=True)
+    assert result["clean_tool_free_pilot"] is False
+    assert result["item_lifecycle_consistent"] is False
