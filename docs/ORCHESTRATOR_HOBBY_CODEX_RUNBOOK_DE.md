@@ -9,6 +9,20 @@ Ein echter Codex-Turn ist weiterhin nicht nachgewiesen. Siehe
 [aktuelle Diagnose und Grenzen](ORCHESTRATOR_MCP_REFRESH_READINESS_REPORT.md).
 Dieser Leitfaden dient zur
 **bewussten manuellen Ausführung auf deinem PC**, nicht als Startfreigabe.
+**Pflichtstopp vor dem ersten echten Turn (Befund vom 27.10.2026):**
+Der lokale MCP-Refresh-Bericht hält fest, dass die jetzt sichtbare
+`codex.exe` weiterhin Version 0.164 meldet, aber einen **anderen
+SHA-256-Fingerprint** hat als die frühere Schema-Erfassung
+(`1103e9e0…` statt `c6144bc1…`). Die bisherige alte
+`offline-readiness.json` darf somit NICHT verwendet werden.
+Zuerst aktuelle EXE und **frisches Schema-Bundle** neu erfassen und
+die Bindung verifizieren. Danach MCP-v2-Quelle, CWD- und MXC-Probe
+erneut prüfen. Der vorherige MXC-Test mit AppData-CWD schlug wegen
+falschem effektivem CWD fehl, während der Temp-CWD-Test damals PASS
+war. Auch der frühere Temp-PASS überträgt sich nicht automatisch
+auf das neue Binary. Siehe
+[lokaler Befund](ORCHESTRATOR_MCP_REFRESH_READINESS_REPORT.md).
+
 
 ## Kurzüberblick
 

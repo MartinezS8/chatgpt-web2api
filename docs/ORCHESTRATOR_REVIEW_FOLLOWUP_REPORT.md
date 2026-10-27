@@ -26,3 +26,15 @@ selection.
 All native login/MCP/turn results are left for the authorized
 Codex instance on Windows. GitHub CI can only prove offline
 behavior and packaging; it does not simulate the local provider.
+
+### Zusätzlicher historischer Readiness-Befund (27. Oktober)
+
+Die lokale Reportdatei `docs/ORCHESTRATOR_MCP_REFRESH_READINESS_REPORT.md`
+erfasst einen Codex-0.164-Binary-Hashwechsel trotz identischer
+Versionsangabe; die früher generierten 320 Schemas sind auf das
+alte Binary gepinnt. Der aktuelle Hash muss vor jedem Pilot neu
+erfasst und mit einem **neuen** Bundle verbunden werden.
+Außerdem war der alte MXC-AppData-CWD-Test negativ; nur Temp
+war zuvor positiv. Beide sind im Gate-2-Review als OPEN erfasst.
+Das ist eine dokumentierte lokale Beobachtung, **kein** durch
+diesen GitHub-PR ausgeführter Test.

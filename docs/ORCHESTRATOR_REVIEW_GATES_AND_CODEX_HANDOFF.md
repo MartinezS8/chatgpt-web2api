@@ -121,3 +121,23 @@ kontrollierter 2-/5-Worker-Livetest.
 Das vollständige lokale Ablaufskript mit bereits vorhandenen MCP-
 und MXC-Schutzschaltern steht in
 `docs/ORCHESTRATOR_HOBBY_CODEX_RUNBOOK_DE.md`.
+
+## Aktueller Lokalgate-Blocker (27. Oktober 2026)
+
+Der [lokale MCP-Refresh-/Readinessbericht](ORCHESTRATOR_MCP_REFRESH_READINESS_REPORT.md)
+dokumentiert für denselben angezeigten nativen Codex-Version-String
+`0.164.0-alpha.11.1` **zwei verschiedene Binary-Fingerprints**:
+frühere Schema-Erfassung `c6144bc1…`, am 27.10. gesehen
+`1103e9e0…`. Die SHA-Bindung des ursprünglichen
+`offline-readiness.json` gilt daher für die jüngere EXE **nicht**.
+**Gate 2 bleibt offen**, bis Codex vor Ort das Schema-Bundle am
+aktuellen Binary NEU erstellt und wieder alle vier Schema-Selectors,
+MCP-v2-Map und den richtigen CWD überprüft hat. Nicht durch das
+identische Versionslabel überspringen.
+
+Der berichtete MXC-Test für `$env:TEMP` PASS, für AppData-CWD aber
+**FAIL (anderes effektives Arbeitsverzeichnis trotz Exit 0)**.
+Deshalb AppData-CWD nicht als bestanden zählen; selbst Temp muss
+nach dem Binary-Wechsel erneut überprüft werden. Ein lokaler
+App-Server-/MCP-Metadaten-PASS auf dem alten Binary ist noch
+keine aktuelle Provider-Inferenzfreigabe.
