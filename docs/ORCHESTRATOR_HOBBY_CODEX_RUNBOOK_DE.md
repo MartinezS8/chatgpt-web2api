@@ -1,11 +1,28 @@
 # Lokaler Hobby-Orchestrator – Codex-Testanleitung (Windows 11)
 
-**Stand:** 24. Oktober 2026, Erweiterung auf Basis von Draft PR #84.
-Native Codex 0.164, MCP-/Apps-Fence und Account-/Modell-Discovery wurden lokal
-geprüft. Ein echter Codex-Turn wurde weiterhin nicht ausgeführt. Siehe
+**Stand der Dokumentation:** 27. Oktober 2026, Review auf Basis des
+gestapelten Draft-HEAD von PR #87 (einschließlich #84).
+Der vorhandene lokale Bericht dokumentiert Codex 0.164,
+MCP-/Apps-Fence und Account-/Modell-Discovery; diese Nachweise stammen
+aus dem lokalen Diagnoselauf, **nicht** von diesem GitHub-Review.
+Ein echter Codex-Turn ist weiterhin nicht nachgewiesen. Siehe
 [aktuelle Diagnose und Grenzen](ORCHESTRATOR_MCP_REFRESH_READINESS_REPORT.md).
 Dieser Leitfaden dient zur
 **bewussten manuellen Ausführung auf deinem PC**, nicht als Startfreigabe.
+**Pflichtstopp vor dem ersten echten Turn (Befund vom 27.10.2026):**
+Der lokale MCP-Refresh-Bericht hält fest, dass die jetzt sichtbare
+`codex.exe` weiterhin Version 0.164 meldet, aber einen **anderen
+SHA-256-Fingerprint** hat als die frühere Schema-Erfassung
+(`1103e9e0…` statt `c6144bc1…`). Die bisherige alte
+`offline-readiness.json` darf somit NICHT verwendet werden.
+Zuerst aktuelle EXE und **frisches Schema-Bundle** neu erfassen und
+die Bindung verifizieren. Danach MCP-v2-Quelle, CWD- und MXC-Probe
+erneut prüfen. Der vorherige MXC-Test mit AppData-CWD schlug wegen
+falschem effektivem CWD fehl, während der Temp-CWD-Test damals PASS
+war. Auch der frühere Temp-PASS überträgt sich nicht automatisch
+auf das neue Binary. Siehe
+[lokaler Befund](ORCHESTRATOR_MCP_REFRESH_READINESS_REPORT.md).
+
 
 ## Kurzüberblick
 
@@ -23,6 +40,11 @@ manueller offizieller Login. Die fünfte kann accountbezogene Daten lesen;
 die sechste kann tatsächlich Modellnutzung verursachen.
 
 ## Einrichten und Offline-Checks
+
+Unbedingt den **aktuellen PR-HEAD** aus GitHub prüfen und nicht versehentlich
+eine ältere Draft-Stufe (#63, #68) oder ungemergtes `master` verwenden.
+Die Checkliste für den gesamten Review steht in
+[Review- und Codex-Abnahmeplan](ORCHESTRATOR_REVIEW_GATES_AND_CODEX_HANDOFF.md).
 
 In PowerShell, im geprüften Entwicklungs-Worktree und mit einer externen
 Python-3.12-Umgebung. `$Python` bezeichnet deren absoluten `python.exe`-Pfad.
@@ -118,7 +140,16 @@ nach Prüfung des leeren Testverzeichnisses:
 ```powershell
 $PromptFile = Join-Path $env:LOCALAPPDATA 'w2a-pilot-prompt-eindeutig.txt'
 $ReceiptDir = Join-Path $env:LOCALAPPDATA 'w2a-pilot-receipt-eindeutig'
-'Output exactly ORCH_TEST_OK. Do not use tools.' | Set-Content -Path "$PromptFile" -Encoding UTF8 -NoNewline
+# BOM-freies UTF-8, auch in Windows PowerShell 5.1
+[System.IO.File]::WriteAllText($PromptFile,
+    'Output exactly ORCH_TEST_OK. Do not use tools.',
+    (New-Object System.Text.UTF8Encoding($false)))
+
+# Rein offline: dieselben aus dem lokalen v2-Manifest überprüften
+# Request-Shapes wie beim Live-Pilot, kein Login und kein Provider-Turn.
+& $Python scripts/preflight_codex_wire.py --schema-root "$SchemaDir" --cwd "$Scratch" --prompt-file "$PromptFile" --model '<EXAKTE_MODEL_ID>' --effort '<EXAKTE_EFFORT>' --thread-params-schema v2/ThreadStartParams.json --thread-result-schema v2/ThreadStartResponse.json --turn-params-schema v2/TurnStartParams.json --turn-result-schema v2/TurnStartResponse.json
+# Falls dieser Preflight nicht PASS ist: hier abbrechen und lokal prüfen.
+# Auch PASS beweist noch keine echten Server-Responses oder MCP-Isolation.
 
 & $Python scripts/pilot_one_codex_turn.py --codex-exe "$CodexExe" --schema-root "$SchemaDir" --cwd "$Scratch" --prompt-file "$PromptFile" --receipt-dir "$ReceiptDir" --model '<EXAKTE_MODEL_ID>' --effort '<EXAKTE_EFFORT>' --windows-sandbox mxc --mcp-source-map "$McpMap" --thread-params-schema v2/ThreadStartParams.json --thread-result-schema v2/ThreadStartResponse.json --turn-params-schema v2/TurnStartParams.json --turn-result-schema v2/TurnStartResponse.json --allow-readonly-builtin-tools --allow-one-turn
 ```
@@ -220,3 +251,16 @@ und einen konsistenten Terminal-Snapshot. Auch verspätete Safe-Notifications
 markieren den Pilot als nicht sauber. Die Redaktionsregeln bleiben erhalten.
 Ein grüner Fake-Test belegt **keine** echte Codex-0.164-Transportkompatibilität
 oder vollständige OS-Isolation. Version-1-Receipts sind kein Audit-v2-PASS.
+
+
+## Ergänzung Review — Status und Abnahme
+
+Die komplette PR-Linie reicht inzwischen mindestens bis #87 und enthält
+mehrere neuere MCP-, Ausgabe- und Sandbox-Prüfungen. Beim lokalen Pilot
+den HEAD des **neuesten geplanten Integrations-PRs** prüfen und ein früheres
+Snippet niemals blind auf einen anderen Codex-Versionsstand übertragen.
+Der Offline-Preflight überprüft Request-Payloads, nicht die reale Antwort
+des Servers. Eine erfolgreiche lokale `result.json` ist kein
+unabhängiger Modell-/Datei-Review und keine Freigabe für automatische
+fünf echte Worker. Vor dem Merge Gate 1–5 aus der obigen Review-Datei
+abarbeiten.
