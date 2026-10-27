@@ -90,6 +90,12 @@ def result_audit_is_consistent(result: dict) -> bool:
         return False
     if result["assistant_message_observed"] and not items.get("agentMessage"):
         return False
+    lifecycle_bad = any(
+        key in notifications
+        for key in ("item_lifecycle", "item_snapshot", "uncorrelated_notification")
+    )
+    if result["item_lifecycle_consistent"] is lifecycle_bad:
+        return False
     found = bool(notifications) or any(name not in SAFE_ITEM_TYPES for name in items)
     clean = (
         result.get("turn_terminal_status") == "completed"

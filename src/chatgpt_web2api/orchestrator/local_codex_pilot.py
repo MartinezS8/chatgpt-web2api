@@ -62,6 +62,7 @@ class _OneTurnWire:
         self._unexpected_tool_activity = False
         # Tracks notification lifecycle per ID without retaining raw item payload.
         self._item_states: dict[str, tuple[str, str]] = {}
+        self._snapshot_items: dict[str, str] = {}
         self._lifecycle_consistent = True
         threading.Thread(target=self._pump, daemon=True).start()
 
@@ -114,13 +115,18 @@ class _OneTurnWire:
             snapshot[key] = category
             if key in self._item_states and self._item_states[key][0] != category:
                 self._mark_lifecycle_problem("item_snapshot")
+            if key in self._snapshot_items and self._snapshot_items[key] != category:
+                self._mark_lifecycle_problem("item_snapshot")
+            self._snapshot_items[key] = category
         if terminal:
             # Completed turn snapshots are authoritative for this observed
             # stream; otherwise a missing final item could yield false CLEAN.
             states = {key: typ for key, (typ, status) in self._item_states.items()
                       if status == "completed"}
             if (states != snapshot or any(
-                    status != "completed" for _, status in self._item_states.values())):
+                    status != "completed" for _, status in self._item_states.values())
+                    or any(snapshot.get(k) != v
+                           for k, v in self._snapshot_items.items())):
                 self._mark_lifecycle_problem("item_snapshot")
 
     def audit_receipt(self, *, complete: bool) -> dict:
@@ -305,6 +311,8 @@ class _OneTurnWire:
                     raise RuntimeError("item notification belongs to another turn")
                 item = params.get("item")
                 self._audit_item(item, event=method)
+                if not started_seen:
+                    self._mark_lifecycle_problem()
                 if terminal_status is not None:
                     self._record_unsafe_notification("late_item")
                 if (terminal_status is None and method == "item/completed"

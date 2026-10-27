@@ -600,3 +600,60 @@ def test_missing_v2_lifecycle_evidence_cannot_pass_cli(monkeypatch):
         arguments.extend([f"--{option}", "synthetic"])
     monkeypatch.setattr("sys.argv", arguments)
     assert main() == 2
+
+
+def test_item_notification_before_turn_started_is_unverified(context, monkeypatch):
+    frames = _success_frames()
+    _add_agent(frames)
+    early = frames.pop(-3)  # agent started
+    frames.insert(3, early)  # ahead of turn/started, after thread/start response
+    monkeypatch.setattr(
+        "chatgpt_web2api.orchestrator.local_codex_pilot.subprocess.Popen",
+        lambda *a, **kw: _FakeProcess(frames),
+    )
+    result = _run(context, allow_one_turn=True)
+    assert result["clean_tool_free_pilot"] is False
+    assert result["unexpected_notification_counts"]["item_lifecycle"] >= 1
+
+
+def test_ack_snapshot_missing_from_terminal_cannot_pass(
+    context, monkeypatch,
+):
+    frames = _success_frames()
+    _add_agent(frames)
+    ack = next(frame for frame in frames if frame.get("id") == 3)
+    ack["result"]["turn"]["items"] = [{
+        "id": "old-safe", "type": "agentMessage", "text": "PRIVATE",
+    }]
+    monkeypatch.setattr(
+        "chatgpt_web2api.orchestrator.local_codex_pilot.subprocess.Popen",
+        lambda *a, **kw: _FakeProcess(frames),
+    )
+    result = _run(context, allow_one_turn=True)
+    assert result["clean_tool_free_pilot"] is False
+    assert result["item_lifecycle_consistent"] is False
+
+
+def test_receipt_consistency_rejects_missing_lifecycle_error_flag():
+    from chatgpt_web2api.orchestrator.local_pilot_tool_audit import (
+        result_audit_is_consistent,
+    )
+    result = {
+        "status": "transport_completed_unreviewed",
+        "live_turn_started": True, "retry_permitted": False,
+        "production_finalization_permitted": False,
+        "assistant_output_matches_expected": True,
+        "assistant_message_observed": True,
+        "assistant_output_preview": "ORCH_TEST_OK",
+        "assistant_output_sha256": hashlib.sha256(b"ORCH_TEST_OK").hexdigest(),
+        "expected_output": "ORCH_TEST_OK",
+        "turn_start_request_id": 3, "turn_terminal_status": "completed",
+        "tool_event_audit_version": 2, "tool_event_audit_complete": True,
+        "tool_event_audit_scope": "observed_app_server_events_only",
+        "observed_item_type_counts": {"agentMessage": 3},
+        "unexpected_notification_counts": {"item_lifecycle": 1},
+        "unexpected_tool_activity_observed": True,
+        "item_lifecycle_consistent": True,
+        "clean_tool_free_pilot": False,
+    }
+    assert result_audit_is_consistent(result) is False
