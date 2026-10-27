@@ -330,3 +330,35 @@ def test_unexpected_output_digest_is_not_accepted_in_audited_receipt(receipt_dir
     _write(receipt_dir, "result.json", result)
 
     assert inspect_local_pilot_receipt(receipt_dir)["classification"] == "INCONSISTENT_RECEIPT"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("max_turn_starts", True),
+    ("max_turn_starts", "1"),
+    ("max_turn_starts", 0),
+    ("status", "transport_completed_unreviewed"),
+])
+def test_malformed_intent_never_receives_terminal_success_classification(
+    receipt_dir, field, value,
+):
+    """Python True == 1 must not let a boolean stand in for the send cap."""
+    _write(receipt_dir, "result.json", _result())
+    intent_path = receipt_dir / "intent.json"
+    content = json.loads(intent_path.read_text(encoding="utf-8"))
+    content[field] = value
+    _write(receipt_dir, "intent.json", content)
+    report = inspect_local_pilot_receipt(receipt_dir)
+    assert report["classification"] == "INCONSISTENT_RECEIPT"
+    assert report["production_finalization_permitted"] is False
+    assert report["automatic_retry_permitted"] is False
+
+
+def test_absent_intent_send_cap_is_not_terminal_ready(receipt_dir):
+    _write(receipt_dir, "result.json", _result())
+    intent_path = receipt_dir / "intent.json"
+    content = json.loads(intent_path.read_text(encoding="utf-8"))
+    content.pop("max_turn_starts")
+    _write(receipt_dir, "intent.json", content)
+    assert inspect_local_pilot_receipt(receipt_dir)["classification"] == (
+        "INCONSISTENT_RECEIPT"
+    )

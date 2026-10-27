@@ -57,7 +57,9 @@ def inspect_local_pilot_receipt(folder_value: str | Path) -> dict:
         )
     if intent is None:
         detail = "intent file is missing or write was interrupted"
-    elif (intent.get("max_turn_starts") != 1
+    elif (intent.get("status") != "possible_send_not_yet_verified"
+          or type(intent.get("max_turn_starts")) is not int
+          or intent["max_turn_starts"] != 1
           or intent.get("retry_permitted") is not False
           or type(intent.get("prompt_sha256")) is not str
           or len(intent["prompt_sha256"]) != 64
