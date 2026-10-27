@@ -362,6 +362,7 @@ class _OneTurnWire:
                     self._record_unsafe_notification("unknown")
                 raise RuntimeError("duplicate turn completion")
             if (not isinstance(params, dict) or params.get("threadId") != thread_id
+                    or params.get("turnId", turn_id) != turn_id
                     or not isinstance(turn, dict) or turn.get("id") != turn_id
                     or turn.get("status") not in {"completed", "failed", "interrupted"}):
                 raise RuntimeError("unmatched or malformed turn completion")

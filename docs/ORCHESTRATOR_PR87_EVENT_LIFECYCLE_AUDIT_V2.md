@@ -40,3 +40,9 @@ worker and all productive finalization remain BLOCKED.
 Multiple final agent messages are conservatively marked
 `ambiguous_final_answer`: a correct **last** message cannot conceal an
 earlier unexpected final message and produce a clean pilot receipt.
+
+
+Terminal `params.turnId` is optional for the pinned protocol shape.
+If supplied, it now must agree with the nested `turn.id` and the
+acknowledged turn ID. A conflicting top-level identifier results in
+quarantine and no retry, even if the nested ID is correct.

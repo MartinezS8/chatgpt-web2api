@@ -689,3 +689,36 @@ def test_earlier_unexpected_final_answer_cannot_be_hidden_by_expected_last_answe
     assert result["unexpected_notification_counts"]["ambiguous_final_answer"] == 1
     assert "PRIVATE_PRIOR_FINAL_OUTPUT" not in (
         context[-1] / "result.json").read_text(encoding="utf-8")
+
+
+def test_terminal_top_level_turn_id_must_not_contradict_nested_turn(
+    context, monkeypatch,
+):
+    frames = _success_frames()
+    _add_agent(frames)
+    frames[-1]["params"]["turnId"] = "foreign-turn"
+    process = _FakeProcess(frames)
+    monkeypatch.setattr(
+        "chatgpt_web2api.orchestrator.local_codex_pilot.subprocess.Popen",
+        lambda *a, **kw: process,
+    )
+    with pytest.raises(RuntimeError, match="unmatched or malformed turn completion"):
+        _run(context, allow_one_turn=True)
+    outgoing = [json.loads(x) for x in process.stdin.getvalue().splitlines()]
+    assert sum(x["method"] == "turn/start" for x in outgoing) == 1
+    receipt = json.loads((context[-1] / "quarantine.json").read_text("utf-8"))
+    assert receipt["turn_start_may_have_been_sent"] is True
+    assert receipt["retry_permitted"] is False
+    assert not (context[-1] / "result.json").exists()
+
+
+def test_terminal_matching_explicit_turn_id_is_accepted(context, monkeypatch):
+    frames = _success_frames()
+    _add_agent(frames)
+    frames[-1]["params"]["turnId"] = "turn-x"
+    monkeypatch.setattr(
+        "chatgpt_web2api.orchestrator.local_codex_pilot.subprocess.Popen",
+        lambda *a, **kw: _FakeProcess(frames),
+    )
+    result = _run(context, allow_one_turn=True)
+    assert result["clean_tool_free_pilot"] is True
