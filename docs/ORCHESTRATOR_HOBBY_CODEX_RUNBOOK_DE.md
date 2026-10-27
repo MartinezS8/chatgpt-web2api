@@ -211,3 +211,12 @@ werden. In beiden Fällen bleibt `retry_permitted: false` und derselbe
 Receipt-Pfad kann nicht erneut verwendet werden. Verfrühte
 `turn/`-Benachrichtigungen sowie widersprüchliche verschachtelte
 Turn-IDs werden jetzt vor einer falschen Terminalbewertung abgefangen.
+
+
+### PR #87 – Audit v2
+
+Der Offline-Audit verlangt künftig zusammenpassende Item-Start-/Abschlussereignisse
+und einen konsistenten Terminal-Snapshot. Auch verspätete Safe-Notifications
+markieren den Pilot als nicht sauber. Die Redaktionsregeln bleiben erhalten.
+Ein grüner Fake-Test belegt **keine** echte Codex-0.164-Transportkompatibilität
+oder vollständige OS-Isolation. Version-1-Receipts sind kein Audit-v2-PASS.
