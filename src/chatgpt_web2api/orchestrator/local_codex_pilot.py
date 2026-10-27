@@ -18,6 +18,17 @@ from pathlib import Path
 from .local_codex_discovery import _pairs_no_duplicates, discover_local_codex
 from .local_pilot_doctor import local_pilot_doctor
 from .local_pilot_messages import read_pilot_prompt, thread_start_params, turn_start_params
+from .local_pilot_tool_audit import (
+    ACTION_ITEM_TYPES,
+    ACTION_NOTIFICATIONS,
+    AUDIT_SCOPE,
+    AUDIT_VERSION,
+    EXPECTED_OUTPUT,
+    EXPECTED_OUTPUT_SHA256,
+    SAFE_ITEM_TYPES,
+    SAFE_NOTIFICATIONS,
+    TURN_START_REQUEST_ID,
+)
 from .local_wire_schema import LocalWireSchemas
 from .mcp_process_guard import verify_mcp_disabled
 from .mcp_runtime_fence import check_installed_apps, require_external_tools_disabled
@@ -46,7 +57,45 @@ class _OneTurnWire:
         self._frames_seen = 0
         self._turn_start_attempts = 0
         self._final_answers: list[str] = []
+        self._item_type_counts: dict[str, int] = {}
+        self._unsafe_notification_counts: dict[str, int] = {}
+        self._unexpected_tool_activity = False
         threading.Thread(target=self._pump, daemon=True).start()
+
+    def _record_unsafe_notification(self, category: str) -> None:
+        self._unexpected_tool_activity = True
+        self._unsafe_notification_counts[category] = (
+            self._unsafe_notification_counts.get(category, 0) + 1
+        )
+
+    def _audit_item(self, item: object) -> None:
+        if not isinstance(item, dict):
+            self._record_unsafe_notification("malformed_item")
+            raise RuntimeError("turn item must be an object")
+        item_type = item.get("type")
+        known = SAFE_ITEM_TYPES | ACTION_ITEM_TYPES
+        category = item_type if isinstance(item_type, str) and item_type in known else "unknown"
+        self._item_type_counts[category] = self._item_type_counts.get(category, 0) + 1
+        if category not in SAFE_ITEM_TYPES:
+            self._unexpected_tool_activity = True
+
+    def _audit_turn_items(self, turn: dict) -> None:
+        items = turn.get("items")
+        if not isinstance(items, list) or len(items) > 512:
+            self._record_unsafe_notification("malformed_item")
+            raise RuntimeError("turn items must be a bounded list")
+        for item in items:
+            self._audit_item(item)
+
+    def audit_receipt(self, *, complete: bool) -> dict:
+        return {
+            "tool_event_audit_version": AUDIT_VERSION,
+            "tool_event_audit_complete": complete,
+            "tool_event_audit_scope": AUDIT_SCOPE,
+            "observed_item_type_counts": dict(self._item_type_counts),
+            "unexpected_notification_counts": dict(self._unsafe_notification_counts),
+            "unexpected_tool_activity_observed": self._unexpected_tool_activity,
+        }
 
     def _pump(self):
         try:
@@ -94,7 +143,7 @@ class _OneTurnWire:
         except (OSError, ValueError):
             raise RuntimeError("single-turn pipe write uncertain; do not retry") from None
 
-    def _next(self, deadline: float):
+    def _next(self, deadline: float, *, allow_eof: bool = False):
         while True:
             if self._overflow.is_set():
                 raise RuntimeError("local app-server output overflow")
@@ -109,6 +158,8 @@ class _OneTurnWire:
             if self._frames_seen > 512:
                 raise RuntimeError("single-turn event limit exceeded")
             if frame is _EOF:
+                if allow_eof:
+                    return _EOF
                 raise RuntimeError("app-server closed with delivery status unknown")
             if isinstance(frame, Exception):
                 raise frame
@@ -119,6 +170,7 @@ class _OneTurnWire:
             if not isinstance(message, dict):
                 raise RuntimeError("local app-server message must be a JSON object")
             if "id" in message and "method" in message:
+                self._record_unsafe_notification("server_request")
                 raise RuntimeError("server-initiated request needs human review; no auto-approval")
             if "id" not in message and not isinstance(message.get("method"), str):
                 raise RuntimeError("unrecognized local app-server notification")
@@ -150,27 +202,54 @@ class _OneTurnWire:
     def initialized(self):
         self._send("initialized", {})
 
-    def wait_terminal(self, *, thread_id: str, turn_id: str) -> str:
+    def wait_terminal(
+        self, *, thread_id: str, turn_id: str, acknowledged_status: str,
+    ) -> tuple[str, str | None]:
         deadline = time.monotonic() + self._timeout
         buffered = self._notifications
         self._notifications = []
+        terminal_status = None
+        started_seen = False
         while True:
-            message = buffered.pop(0) if buffered else self._next(deadline)
+            message = buffered.pop(0) if buffered else self._next(
+                deadline, allow_eof=terminal_status is not None,
+            )
+            if message is _EOF:
+                try:
+                    exit_code = self._p.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    raise RuntimeError("app-server did not stop after terminal event") from None
+                if exit_code != 0:
+                    raise RuntimeError("app-server failed after terminal event")
+                return terminal_status, (self._final_answers[-1] if self._final_answers else None)
             if "id" in message:
                 raise RuntimeError("unexpected extra app-server RPC result")
             method = message["method"]
             if method == "model/rerouted":
                 raise RuntimeError("model rerouting is not accepted by the pinned pilot")
-            if method == "item/completed":
+            params = message.get("params")
+            if method in SAFE_NOTIFICATIONS and not isinstance(params, dict):
+                raise RuntimeError("malformed notification")
+            if isinstance(params, dict) and not method.startswith(("turn/", "item/")):
+                if (params.get("threadId") not in (None, thread_id)
+                        or params.get("turnId") not in (None, turn_id)):
+                    raise RuntimeError("foreign thread or turn notification")
+                notified_thread = params.get("thread")
+                if (isinstance(notified_thread, dict) and "id" in notified_thread
+                        and notified_thread["id"] != thread_id):
+                    raise RuntimeError("foreign thread notification")
+            if method in {"item/started", "item/completed"}:
                 params = message.get("params")
                 if not isinstance(params, dict) or params.get("threadId") != thread_id:
-                    raise RuntimeError("foreign or malformed agent message")
+                    raise RuntimeError("foreign or malformed item notification")
                 if params.get("turnId") != turn_id:
-                    raise RuntimeError("agent message belongs to another turn")
+                    raise RuntimeError("item notification belongs to another turn")
                 item = params.get("item")
-                if not isinstance(item, dict):
-                    raise RuntimeError("completed item must be an object")
-                if item.get("type") == "agentMessage":
+                self._audit_item(item)
+                if terminal_status is not None:
+                    self._record_unsafe_notification("late_item")
+                if (terminal_status is None and method == "item/completed"
+                        and item.get("type") == "agentMessage"):
                     text = item.get("text")
                     if not isinstance(text, str) or len(text) > 8192:
                         raise RuntimeError("agent message missing or exceeds bounded size")
@@ -179,6 +258,10 @@ class _OneTurnWire:
                             raise RuntimeError("excessive final agent messages")
                         self._final_answers.append(text)
             if method != "turn/completed":
+                if method not in SAFE_NOTIFICATIONS and method not in {
+                    "item/started", "item/completed",
+                }:
+                    self._record_unsafe_notification(ACTION_NOTIFICATIONS.get(method, "unknown"))
                 if method.startswith(("turn/", "item/")):
                     params = message.get("params")
                     if not isinstance(params, dict) or params.get("threadId") != thread_id:
@@ -190,14 +273,39 @@ class _OneTurnWire:
                     if (isinstance(nested, dict) and "id" in nested
                             and nested["id"] != turn_id):
                         raise RuntimeError("nested notification belongs to another turn")
+                    if method == "turn/started":
+                        if (started_seen or terminal_status is not None
+                                or not isinstance(nested, dict)
+                                or nested.get("id") != turn_id
+                                or nested.get("status") != "inProgress"
+                                or nested.get("error") is not None):
+                            raise RuntimeError("turn started status is inconsistent")
+                        self._audit_turn_items(nested)
+                        started_seen = True
                 continue
             params = message.get("params")
             turn = params.get("turn") if isinstance(params, dict) else None
+            if terminal_status is not None:
+                if (isinstance(params, dict) and params.get("threadId") == thread_id
+                        and isinstance(turn, dict) and turn.get("id") == turn_id):
+                    self._audit_turn_items(turn)
+                else:
+                    self._record_unsafe_notification("unknown")
+                raise RuntimeError("duplicate turn completion")
             if (not isinstance(params, dict) or params.get("threadId") != thread_id
                     or not isinstance(turn, dict) or turn.get("id") != turn_id
                     or turn.get("status") not in {"completed", "failed", "interrupted"}):
                 raise RuntimeError("unmatched or malformed turn completion")
-            return turn["status"], (self._final_answers[-1] if self._final_answers else None)
+            if (not started_seen or (turn["status"] == "completed"
+                                     and turn.get("error") is not None)):
+                raise RuntimeError("turn completion status is inconsistent")
+            self._audit_turn_items(turn)
+            terminal_status = turn["status"]
+            if acknowledged_status != "inProgress" and acknowledged_status != terminal_status:
+                raise RuntimeError("turn acknowledgement and terminal status differ")
+            # Do not declare a clean observation until all remaining stdout
+            # frames and EOF are consumed after a clean local process shutdown.
+            self._p.stdin.close()
 
 
 
@@ -239,6 +347,7 @@ def _create_intent(
         "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
         "model": model, "effort": effort, "cwd": str(cwd),
         "windows_sandbox_requested": windows_sandbox,
+        "turn_start_request_id": TURN_START_REQUEST_ID,
         "max_turn_starts": 1, "retry_permitted": False,
         "created_unix": time.time(),
     }
@@ -377,20 +486,30 @@ def run_one_local_pilot(
             thread_id=thread_id, prompt=prompt, model=wire_model, effort=effort, cwd=str(root),
         )
         wire_schemas.require("turn_params", turn_params)
-        response = wire.rpc(3, "turn/start", turn_params)
+        response = wire.rpc(TURN_START_REQUEST_ID, "turn/start", turn_params)
         wire_schemas.require("turn_result", response)
         turn = response.get("turn")
         if not isinstance(turn, dict) or not isinstance(turn.get("id"), str):
             raise RuntimeError("turn/start acknowledgement lacks turn id")
+        acknowledged_status = turn.get("status")
+        if acknowledged_status not in {"inProgress", "completed", "failed", "interrupted"}:
+            raise RuntimeError("turn/start acknowledgement has invalid status")
+        if acknowledged_status == "completed" and turn.get("error") is not None:
+            raise RuntimeError("turn/start acknowledgement status is inconsistent")
         turn_id = turn["id"]
-        terminal, answer = wire.wait_terminal(thread_id=thread_id, turn_id=turn_id)
-        answer_matches = terminal == "completed" and answer == "ORCH_TEST_OK"
+        wire._audit_turn_items(turn)
+        terminal, answer = wire.wait_terminal(
+            thread_id=thread_id, turn_id=turn_id, acknowledged_status=acknowledged_status,
+        )
+        answer_matches = terminal == "completed" and answer == EXPECTED_OUTPUT
+        audit = wire.audit_receipt(complete=True)
         result = {
             "status": "transport_completed_unreviewed" if terminal == "completed"
                       else "turn_ended_needs_review",
             "turn_terminal_status": terminal,
             "thread_id": thread_id,
             "turn_id": turn_id,
+            "turn_start_request_id": TURN_START_REQUEST_ID,
             "live_turn_started": True,
             "retry_permitted": False,
             "intent_sha256": intent_sha,
@@ -407,12 +526,15 @@ def run_one_local_pilot(
             "sandbox_implementation_independently_verified": False,
             "assistant_message_observed": answer is not None,
             "assistant_output_sha256": (
-                hashlib.sha256(answer.encode("utf-8")).hexdigest()
-                if answer is not None else None
+                EXPECTED_OUTPUT_SHA256 if answer_matches else None
             ),
-            "assistant_output_preview": answer[:1024] if answer is not None else None,
-            "expected_output": "ORCH_TEST_OK",
+            # Only the fixed expected answer may be copied into the receipt;
+            # arbitrary model/tool output can contain sensitive local data.
+            "assistant_output_preview": EXPECTED_OUTPUT if answer_matches else None,
+            "expected_output": EXPECTED_OUTPUT,
             "assistant_output_matches_expected": answer_matches,
+            "clean_tool_free_pilot": answer_matches and not audit["unexpected_tool_activity_observed"],
+            **audit,
             "content_verified_by_operator": False,
         }
         _write_new_json(receipts / "result.json", result)
@@ -427,9 +549,11 @@ def run_one_local_pilot(
                        else "pre_turn_failure_no_turn_start_attempted"),
             "error_type": type(exc).__name__,
             "turn_start_may_have_been_sent": turn_attempted,
+            "turn_start_request_id": TURN_START_REQUEST_ID if turn_attempted else None,
             "retry_permitted": False,
             "receipt_requires_manual_review": True,
             "intent_sha256": intent_sha,
+            **(wire.audit_receipt(complete=False) if wire is not None else {}),
         })
         raise
     finally:
