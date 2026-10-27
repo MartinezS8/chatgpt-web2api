@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 
 from .local_codex_discovery import _pairs_no_duplicates
+from .local_pilot_tool_audit import result_audit_is_consistent
 from .storage_hardening import reject_reparse_path
 
 
@@ -43,6 +44,7 @@ def inspect_local_pilot_receipt(folder_value: str | Path) -> dict:
 
     status = "INCONSISTENT_RECEIPT"
     turn_attempted = None
+    audit_consistent = False
     # This is a locally consistent hash link, not a signature/third-party
     # delivery proof; legacy receipts may lack the field.
     observed = result if result is not None else quarantine
@@ -81,17 +83,39 @@ def inspect_local_pilot_receipt(folder_value: str | Path) -> dict:
                 and bool(result["thread_id"])
                 and isinstance(result.get("turn_id"), str)
                 and bool(result["turn_id"])):
-            if terminal != "completed":
+            audit_present = any(key in result for key in (
+                "tool_event_audit_version", "tool_event_audit_complete",
+                "tool_event_audit_scope", "observed_item_type_counts",
+                "unexpected_notification_counts", "unexpected_tool_activity_observed",
+                "clean_tool_free_pilot",
+            ))
+            audit_consistent = audit_present and result_audit_is_consistent(result)
+            matches = result.get("assistant_output_matches_expected")
+            message_observed = result.get("assistant_message_observed")
+            if audit_present and not audit_consistent:
+                detail = "tool-event audit is incomplete, malformed or contradictory"
+            elif audit_present and (
+                type(intent.get("turn_start_request_id")) is not int
+                or intent["turn_start_request_id"] != result["turn_start_request_id"]
+            ):
+                detail = "turn request id does not match the bound intent"
+            elif matches is True and message_observed is not True:
+                detail = "matching output has no observed assistant message"
+            elif terminal != "completed":
                 status = "TERMINAL_FAILED_OR_INTERRUPTED"
-            elif (result.get("assistant_output_matches_expected") is True
-                  and result.get("assistant_message_observed") is True):
+            elif audit_consistent and result["unexpected_tool_activity_observed"]:
+                status = "TERMINAL_UNEXPECTED_TOOL_ACTIVITY"
+            elif matches is True and audit_consistent and binding_verified:
                 status = "TERMINAL_OUTPUT_MATCHED_UNREVIEWED"
-            elif result.get("assistant_output_matches_expected") is False:
+            elif matches is True:
+                status = "TERMINAL_TOOL_AUDIT_UNVERIFIED"
+            elif matches is False:
                 status = "TERMINAL_OUTPUT_MISMATCH_OR_MISSING"
             else:
                 status = "LEGACY_TERMINAL_OUTPUT_UNCHECKED"
             turn_attempted = True
-            detail = "terminal transport; assistant output not independently proven"
+            if status != "INCONSISTENT_RECEIPT":
+                detail = "terminal transport; provider output and tool absence not independently proven"
         else:
             detail = "terminal result has conflicting or incomplete fields"
     elif quarantine is not None:
@@ -128,5 +152,16 @@ def inspect_local_pilot_receipt(folder_value: str | Path) -> dict:
         "production_finalization_permitted": False,
         "provider_output_independently_verified": False,
         "receipt_intent_binding_verified": binding_verified,
+        "tool_event_audit_consistent": audit_consistent,
+        "unexpected_tool_activity_observed": (
+            observed["unexpected_tool_activity_observed"]
+            if observed is not None
+            and type(observed.get("unexpected_tool_activity_observed")) is bool else None
+        ),
+        "clean_tool_free_pilot": (
+            result["clean_tool_free_pilot"]
+            if (result is not None and audit_consistent and binding_verified
+                and status != "INCONSISTENT_RECEIPT") else None
+        ),
         "read_only_inspection": True,
     }

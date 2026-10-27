@@ -15,6 +15,7 @@ def receipt_dir(tmp_path):
     (folder / "intent.json").write_text(json.dumps({
         "status": "possible_send_not_yet_verified",
         "prompt_sha256": "a" * 64,
+        "turn_start_request_id": 3,
         "max_turn_starts": 1,
         "retry_permitted": False,
     }), encoding="utf-8")
@@ -165,7 +166,7 @@ def test_legacy_result_does_not_claim_binding(receipt_dir):
 
 
 @pytest.mark.parametrize("matches,observed,expected", [
-    (True, True, "TERMINAL_OUTPUT_MATCHED_UNREVIEWED"),
+    (True, True, "TERMINAL_TOOL_AUDIT_UNVERIFIED"),
     (False, True, "TERMINAL_OUTPUT_MISMATCH_OR_MISSING"),
     (False, False, "TERMINAL_OUTPUT_MISMATCH_OR_MISSING"),
 ])
@@ -179,3 +180,148 @@ def test_terminal_transport_is_not_confused_with_correct_answer(
     report = inspect_local_pilot_receipt(receipt_dir)
     assert report["classification"] == expected
     assert report["production_finalization_permitted"] is False
+
+
+@pytest.mark.parametrize("unexpected,clean,expected", [
+    (False, True, "TERMINAL_OUTPUT_MATCHED_UNREVIEWED"),
+    (True, False, "TERMINAL_UNEXPECTED_TOOL_ACTIVITY"),
+    (True, True, "INCONSISTENT_RECEIPT"),
+    (False, False, "INCONSISTENT_RECEIPT"),
+])
+def test_matching_answer_needs_consistent_tool_event_audit(
+    receipt_dir, unexpected, clean, expected,
+):
+    import hashlib
+
+    result = _result()
+    result.update(
+        assistant_output_matches_expected=True,
+        assistant_message_observed=True,
+        assistant_output_preview="ORCH_TEST_OK",
+        assistant_output_sha256=hashlib.sha256(b"ORCH_TEST_OK").hexdigest(),
+        expected_output="ORCH_TEST_OK",
+        turn_start_request_id=3,
+        intent_sha256=hashlib.sha256((receipt_dir / "intent.json").read_bytes()).hexdigest(),
+        tool_event_audit_version=1,
+        tool_event_audit_complete=True,
+        tool_event_audit_scope="observed_app_server_events_only",
+        observed_item_type_counts=({"agentMessage": 1, "commandExecution": 1} if unexpected
+                                   else {"agentMessage": 1}),
+        unexpected_notification_counts={},
+        unexpected_tool_activity_observed=unexpected,
+        clean_tool_free_pilot=clean,
+    )
+    _write(receipt_dir, "result.json", result)
+
+    report = inspect_local_pilot_receipt(receipt_dir)
+
+    assert report["classification"] == expected
+    assert report["production_finalization_permitted"] is False
+
+
+def test_audit_counts_cannot_disagree_with_no_tool_claim(receipt_dir):
+    import hashlib
+
+    result = _result()
+    result.update(
+        assistant_output_matches_expected=True,
+        assistant_message_observed=True,
+        assistant_output_preview="ORCH_TEST_OK",
+        assistant_output_sha256=hashlib.sha256(b"ORCH_TEST_OK").hexdigest(),
+        expected_output="ORCH_TEST_OK",
+        turn_start_request_id=3,
+        tool_event_audit_version=1,
+        tool_event_audit_complete=True,
+        tool_event_audit_scope="observed_app_server_events_only",
+        observed_item_type_counts={"agentMessage": 1, "commandExecution": 1},
+        unexpected_notification_counts={},
+        unexpected_tool_activity_observed=False,
+        clean_tool_free_pilot=True,
+    )
+    _write(receipt_dir, "result.json", result)
+
+    assert inspect_local_pilot_receipt(receipt_dir)["classification"] == "INCONSISTENT_RECEIPT"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("assistant_output_sha256", "0" * 64),
+    ("assistant_output_preview", "other"),
+    ("expected_output", "other"),
+    ("turn_start_request_id", 99),
+    ("observed_item_type_counts", {}),
+])
+def test_audited_receipt_rejects_conflicting_output_or_request_id(receipt_dir, field, value):
+    import hashlib
+
+    result = _result()
+    result.update(
+        assistant_output_matches_expected=True,
+        assistant_message_observed=True,
+        assistant_output_preview="ORCH_TEST_OK",
+        assistant_output_sha256=hashlib.sha256(b"ORCH_TEST_OK").hexdigest(),
+        expected_output="ORCH_TEST_OK",
+        turn_start_request_id=3,
+        tool_event_audit_version=1,
+        tool_event_audit_complete=True,
+        tool_event_audit_scope="observed_app_server_events_only",
+        observed_item_type_counts={"agentMessage": 1},
+        unexpected_notification_counts={},
+        unexpected_tool_activity_observed=False,
+        clean_tool_free_pilot=True,
+        intent_sha256=hashlib.sha256((receipt_dir / "intent.json").read_bytes()).hexdigest(),
+    )
+    result[field] = value
+    _write(receipt_dir, "result.json", result)
+
+    assert inspect_local_pilot_receipt(receipt_dir)["classification"] == "INCONSISTENT_RECEIPT"
+
+
+def test_request_id_must_match_bound_intent(receipt_dir):
+    import hashlib
+
+    intent_path = receipt_dir / "intent.json"
+    intent = json.loads(intent_path.read_text(encoding="utf-8"))
+    intent["turn_start_request_id"] = 99
+    intent_path.write_text(json.dumps(intent), encoding="utf-8")
+    result = _result()
+    result.update(
+        assistant_output_matches_expected=True,
+        assistant_message_observed=True,
+        assistant_output_preview="ORCH_TEST_OK",
+        assistant_output_sha256=hashlib.sha256(b"ORCH_TEST_OK").hexdigest(),
+        expected_output="ORCH_TEST_OK",
+        turn_start_request_id=3,
+        tool_event_audit_version=1,
+        tool_event_audit_complete=True,
+        tool_event_audit_scope="observed_app_server_events_only",
+        observed_item_type_counts={"agentMessage": 1},
+        unexpected_notification_counts={},
+        unexpected_tool_activity_observed=False,
+        clean_tool_free_pilot=True,
+        intent_sha256=hashlib.sha256(intent_path.read_bytes()).hexdigest(),
+    )
+    _write(receipt_dir, "result.json", result)
+
+    assert inspect_local_pilot_receipt(receipt_dir)["classification"] == "INCONSISTENT_RECEIPT"
+
+
+def test_unexpected_output_digest_is_not_accepted_in_audited_receipt(receipt_dir):
+    result = _result()
+    result.update(
+        assistant_output_matches_expected=False,
+        assistant_message_observed=True,
+        assistant_output_preview=None,
+        assistant_output_sha256="0" * 64,
+        expected_output="ORCH_TEST_OK",
+        turn_start_request_id=3,
+        tool_event_audit_version=1,
+        tool_event_audit_complete=True,
+        tool_event_audit_scope="observed_app_server_events_only",
+        observed_item_type_counts={"agentMessage": 1},
+        unexpected_notification_counts={},
+        unexpected_tool_activity_observed=False,
+        clean_tool_free_pilot=False,
+    )
+    _write(receipt_dir, "result.json", result)
+
+    assert inspect_local_pilot_receipt(receipt_dir)["classification"] == "INCONSISTENT_RECEIPT"

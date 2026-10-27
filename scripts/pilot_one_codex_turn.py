@@ -5,6 +5,7 @@ import argparse
 import json
 
 from chatgpt_web2api.orchestrator.local_codex_pilot import run_one_local_pilot
+from chatgpt_web2api.orchestrator.local_pilot_tool_audit import result_audit_is_consistent
 
 
 def main() -> int:
@@ -48,10 +49,7 @@ def main() -> int:
         windows_sandbox=args.windows_sandbox,
     )
     print(json.dumps(result, indent=2, sort_keys=True))
-    return 0 if (
-        result["turn_terminal_status"] == "completed"
-        and result["assistant_output_matches_expected"] is True
-    ) else 2
+    return 0 if result.get("clean_tool_free_pilot") is True and result_audit_is_consistent(result) else 2
 
 
 if __name__ == "__main__":

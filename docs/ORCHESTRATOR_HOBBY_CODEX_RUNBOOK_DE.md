@@ -138,6 +138,23 @@ Transportbeendigung schreibt `result.json` mit Status
 untersucht wurde. Ein Terminal-Event bedeutet nicht automatisch, dass alle
 Aufgabenergebnisse validiert sind.
 
+Das Tool-Ereignis-Audit v1 zählt ausschließlich feste Typnamen; unbekannte
+Typen erscheinen als `unknown`. Tool- oder Approval-Ereignisse, unbekannte
+Ereignisse und widersprüchliche Statuswerte verhindern einen sauberen
+Pilotstatus. Der Pilot liefert Exitcode 0 nur bei korrekter Antwort und
+`clean_tool_free_pilot=true`. Der Receipt-Inspector verlangt zusätzlich eine
+konsistente, vollständige Audit-Aufzeichnung und die Bindung an `intent.json`;
+ältere Receipts ohne Audit gelten dafür als ungeprüft.
+
+```powershell
+& $Python scripts/inspect_pilot_receipt.py --receipt-dir "$ReceiptDir"
+```
+
+Das Audit wertet beobachtete App-Server-Ereignisse aus und kann bereits
+erfolgte Aktionen erst nachträglich erkennen. Es verhindert keine Tool-Aktion
+und beweist weder vollständige Ereignismeldung noch wirksame Windows-Isolation.
+Tool-Payloads und unerwartete Modellantworten werden nicht ins Receipt kopiert.
+
 ## Konsequenzen für Hobbybetrieb
 
 Es ist möglich, für einen reinen Hobbyversuch zunächst ohne Enterprise-VM

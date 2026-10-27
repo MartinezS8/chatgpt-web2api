@@ -1,3 +1,85 @@
+# Current assessment – PR #86 / Phase 48b follow-up (2026-10-27)
+
+This section supersedes earlier readiness snapshots below where they describe an older PR, Codex version, schema bundle, or test count. Historical entries remain for audit context and must not be read as current evidence.
+
+## Current Git and hosted evidence
+
+- Repository: `MartinezS8/chatgpt-web2api`.
+- Implementation branch: `codex/orchestrator-v83-tool-event-audit`.
+- PR #86: [open Draft PR](https://github.com/MartinezS8/chatgpt-web2api/pull/86), stacked on PR #85 / base branch `codex/orchestrator-v82-mcp-provenance-refresh`.
+- PR #86 base SHA at review: `b5e1121e0fe667a64bed965221c858c9b2bb203a`.
+- Code SHA tested by local validation and the first exact-head hosted run: `ed38ac62e33870fc6b2cd3699bb3f1278eb3b680`.
+- PR #86 was open, draft, and pointed at that exact head when checked. PR #85 was also open and draft at the same head. No merge was performed.
+- Exact-head Actions run [40485598322](https://github.com/MartinezS8/chatgpt-web2api/actions/runs/40485598322) completed with all three jobs successful: Windows/Python 3.12 strict offline verifier, full-history Gitleaks, and wheel/sdist build plus fresh-installed-wheel CLI and offline integration smoke. The strict job reported **1,666 passed, 2 skipped, 20 subtests passed**, and 31 live E2E tests deselected. The distribution job built both artifacts, installed the wheel in a fresh Python 3.12 environment, and passed CLI, synthetic five-worker, crash-recovery, and read-only MCP checks. These are developer/CI results, not live-provider or production evidence.
+
+## Phase 48b implementation and version-matched schema review
+
+PR #86 adds a versioned, fail-closed audit of observed app-server item and notification events to the one-turn pilot path. Tool/action/approval/hook/unknown event types, malformed or contradictory receipts, and duplicate terminal events cannot be represented as a clean tool-free pilot. Receipts store fixed categories, counts and correlation metadata; they do not retain raw event payloads or unexpected model output. The send remains single-shot, and uncertainty is quarantined without retry.
+
+The separate JSONL fake subprocess is synthetic and pins its fixtures to Codex `0.157.0` (`offline-fake-model-0.157`). The fresh installed local binary reported `codex-cli 0.164.0-alpha.11.1`, SHA-256 `1103e9e09c71fa2cd0afd6d8f3b9a2d63174fe8efd7cb5bd09f1cb14ef58a098`. A new local bundle was generated for that exact binary without starting a turn or using account credentials. It contained 320 schema files. The prior bundle and newly generated bundle had the same 320 paths and identical per-file hashes, but were bound to different executable hashes; the old bundle was correctly rejected for the new executable.
+
+A synthetic fixture audit against the current generated schemas accepted `ThreadStartParams`, `TurnStartParams`, `TurnStartResponse`, and the model-list response. The Phase-48a minimal `thread/start` response fixture did **not** validate as `ThreadStartResponse` for Codex 0.164 (14 schema errors, including the `approvalsReviewer`, `sandbox`, and `thread` structures). The fake child still explicitly models the older 0.157 response shape. Therefore:
+
+- The installed-wheel fake-process roundtrip is evidence for the synthetic, 0.157-style offline harness only; it is not evidence that a real 0.164 app-server exchange works.
+- The real-pilot implementation loads four explicitly selected schemas from the locally hash-verified bundle and checks that their version equals the pinned executable's version. It validates outgoing thread parameters before `thread/start`, then validates the returned thread response before it can emit `turn/start`. A schema mismatch therefore fails closed before a model turn, but it can be discovered only after `thread/start` has already been sent; a future explicitly approved attempt could create an empty thread before aborting. No such request was sent in this validation.
+- This mismatch is a documented simulation/compatibility gap. The synthetic harness remains suitable for its bounded offline protocol tests, but the current Codex-version transport behavior remains **NOT TESTED**. Do not claim the fake is version-matched to the installed 0.164 binary.
+
+## Actual no-turn local preflight
+
+The preflight used the native binary above and a freshly generated bundle and configuration-only MCP source map in temporary locations. It performed only `--version`, schema generation, configuration/source inspection, process startup and the explicitly authorized read-only account/model discovery described here. It did not open a browser, start a thread or turn, run inference, or access personal conversations/projects.
+
+- Source inventory: 7 effective MCP configuration sources (5 user-config, 0 project-config, 2 plugin-manifest); 0 unresolved sources. One plugin candidate was conservatively rejected. Runtime process-local overrides disabled all 6 initially enabled MCP entries; Apps were disabled. The config snapshot was verified against the current executable, CWD, inventory and relevant configuration hashes.
+- A no-account startup probe exited cleanly. It observed 16 installed Apps, all disabled/non-callable. Six MCP status records had zero callable MCP tools/resources and inactive status. The probe did **not** prove built-in tools absent: `strict_zero_tools_verified=false`, `built_in_tools_absent_verified=false`, and `readonly_builtin_tool_risk_remains=true`.
+- A separately authorized, no-inference read-only discovery found an account in `chatgpt` mode and eight model records; the exact `gpt-6-luna` / `max` selection was present. No email or raw account payload was retained in this report. This confirms catalog availability at that point only; it does not authorize or prove a turn.
+- The fixed MXC child probe used a process-only read-only permission profile with network disabled and verified its fixed CWD. It proves only that narrow probe, not hostile same-user isolation, full scratch-only file access, or equivalence with the live pilot's RPC path.
+
+## Local and installed-wheel test evidence
+
+All accepted local validation used Windows 11 and CPython 3.12.10 x64. The system Python currently on PATH is 3.13.6 and was not used as acceptance evidence. A preliminary 3.13 collection attempt lacked the configured project dependencies and ran no tests; it is not counted as a test result.
+
+| Check | Exact procedure / revision | Result |
+|---|---|---|
+| Focused pilot regression tests | Pilot tool-audit, CLI and receipt tests on `ed38ac62e33870fc6b2cd3699bb3f1278eb3b680` | PASS – 105 passed |
+| Ruff | `python -m ruff check src/ tests/ scripts/pilot_one_codex_turn.py` in the external 3.12.10 environment | PASS |
+| Bytecode compilation | `compileall` with a short external cache prefix (the default long prefix first hit Windows path-length limits) | PASS after using the bounded external prefix; no repository test artifacts left behind |
+| Full strict offline verifier | `W2A_E2E_RUN=0`; `python scripts/verify_orchestrator.py --full --strict --expected-sha ed38ac62e33870fc6b2cd3699bb3f1278eb3b680 --timeout 1200` | PASS – exit 0; **1,665 passed, 3 skipped, 20 subtests passed**, 31 E2E deselected; exact SHA and clean worktree before/after |
+| Report-head strict offline verifier | `W2A_E2E_RUN=0`; exact SHA `77d65e99360cd3bbe6edb4690ed04a3239040edf`; same full strict command, local loopback available | PASS – exit 0; compileall 0.28 s, pytest exit 0 in 671.84 s, Ruff exit 0 in 1.78 s; exact SHA and clean worktree before/after; strict gate complete. Test count was not retained because diagnostics were disabled; no count is inferred. The verifier still records `network_isolation_verified=false`. |
+| Local loopback / focused rerun | Bounded `socket.socketpair()` probe, then the three pilot/receipt/audit modules on `77d65e9` with correct `PYTHONPATH` | PASS – loopback probe passed; 105 tests passed in 7.72 s. An initial direct invocation without `PYTHONPATH` failed collection and was immediately corrected. |
+| Fresh wheel fake-process smoke | Built wheel/sdist from `git archive` of the exact code SHA outside the checkout; installed wheel into fresh Python 3.12.10 venv; ran isolated module/child smoke | PASS – module loaded from installed wheel, synthetic JSONL child exited 0, model mismatch blocked before thread/turn, timeout emitted one `turn/start`, replay emitted none; no provider or real Codex child |
+| Exact-head GitHub CI | Run `40485598322`, commit `ed38ac62e33870fc6b2cd3699bb3f1278eb3b680` | PASS – strict Windows/Python 3.12, full-history Gitleaks, wheel/sdist and installed CLI/offline integration jobs |
+| PR #86 report-head exact CI | Run `40495104439`, SHA `5c6f7bd8f690a2fa1fb704fed2c5aa5127b19ae4` | PASS – strict Windows/Python 3.12: 1,666 passed, 2 skipped, 20 subtests; 31 E2E deselected; exact SHA/clean worktree, compileall and Ruff passed. Full-history Gitleaks passed. Wheel and sdist built; fresh Python 3.12 install, CLI help/capabilities, synthetic five-worker offline, crash-recovery and read-only MCP smokes passed. Only non-blocking Node 20 deprecation warnings. |
+
+The differing local/hosted pytest totals (1,665/3 skipped locally versus 1,666/2 skipped in hosted Windows CI) are preserved as separate receipts; they are not normalized or conflated. The earlier exploratory Ruff invocation across every legacy script directory found unrelated existing findings outside the required target; the required source/tests/pilot-script invocation and strict verifier passed.
+
+## Follow-up strict run and Windows loopback restriction
+
+A standard-sandbox run on report-only SHA `34a50a432d5eff94bad5d7a40183b1c75aa9993b` timed out at 1,200.05 seconds in pytest (exit 124); compileall and Ruff passed, and strict SHA/clean-worktree preflight and postflight passed. A focused faulthandler trace isolated the hang to Python 3.12's Windows Proactor event-loop setup in `socket._fallback_socketpair()` at the local listener `accept()`. A bounded probe using `socket.setdefaulttimeout(1.0); socket.socketpair()` independently timed out. This was a sandbox restriction on local loopback, not a test assertion failure.
+
+With an execution allowance for local loopback only, the socketpair probe passed and the focused pilot/receipt/event-audit tests passed (105 in 7.72 s). The full strict verifier then passed on report-only descendant SHA `77d65e99360cd3bbe6edb4690ed04a3239040edf` with `W2A_E2E_RUN=0` and `--timeout 1200`: compileall exit 0 (0.28 s), pytest exit 0 (671.84 s), Ruff exit 0 (1.78 s), `local_gate_complete=true`, exact SHA matched, and clean worktree at start and end. The strict receipt intentionally omitted raw stdout; therefore this run's test count is not claimed. `network_isolation_verified=false` remains recorded; the local permission is not evidence of OS-level egress isolation.
+
+An earlier standalone focused invocation omitted the verifier's `PYTHONPATH` (`src/` plus `tests/`) and failed during collection with `ModuleNotFoundError`. The corrected invocation passed as described above. No code change was needed for either environment issue. The hosted run `40485598322` remains the separate exact-head CI receipt for code SHA `ed38ac62e33870fc6b2cd3699bb3f1278eb3b680`; run `40495104439` independently confirms all three jobs on report-head SHA `5c6f7bd8f690a2fa1fb704fed2c5aa5127b19ae4`.
+## Current readiness matrix
+
+| Gate | Status | Evidence and limit |
+|---|---|---|
+| Phase 48b bounded fake JSONL subprocess | PASS | Adversarial synthetic protocol tests and fresh installed-wheel child smoke; fixture is 0.157-style |
+| Installed Codex 0.164 schema capture/pinning | PASS | 320 local schema files tied to the exact binary hash; no live turn |
+| Phase-48a fixture compatibility with installed Codex 0.164 | PARTIAL | Params/results tested synthetically, but the old `thread/start` response fixture fails the current response schema; fake remains 0.157-style |
+| Tool-event audit / fail-closed receipt | PASS for observed events | Exact-head local/CI tests; audit is retrospective and depends on emitted events, so it cannot prevent an action or attest a complete stream |
+| Phase 48c durable reconciliation | PARTIAL | Existing ledger/outbox evidence remains synthetic; authenticated operator reconciliation/override is not complete |
+| Read-only MCP observer | PASS for tested boundary | Tools/arguments/output are bounded and redacted; this is not worker authority or a guarantee that built-in Codex tools do not exist |
+| Hostile same-user Windows TOCTOU isolation | FAIL | Same Windows identity can reach the controller user's objects; path/child-process checks do not prove OS isolation |
+| Effective second-user ACL denial | NOT TESTED | No authorized restricted account/context is available; none was created |
+| Phase 48d real worker | BLOCKED / NOT TESTED | No separate authorization for a live turn and no demonstrated worker isolation boundary; no thread or turn started |
+| Gates 49–51 / two or five real workers | NOT TESTED | Mock DAG/worker evidence is not concurrent live-session evidence |
+| Production Ready | FAIL | No production authorization, supported live transport evidence, effective isolation proof, or operational release controls |
+
+## Next action and minimum prerequisites
+
+Continue offline only. First keep the 0.157 fake scope explicit and add a version-specific synthetic fixture for the currently installed schema if the fake is intended to claim current-version compatibility. Otherwise leave the protocol fake version-labelled and make a separately reviewed current-schema fixture test the gate before any transport attempt. Preserve the rule that a thread response mismatch aborts before `turn/start`; account for the possibility that `thread/start` itself may create a remote thread.
+
+The operator previously stated: “Kein Testkontext vorhanden – Live-Gate blockiert lassen.” That remains controlling. Before any live pilot, a separately authorized Windows isolation boundary must be demonstrated and the user must freshly approve the exact single prompt, model/effort, scratch path, outbound data scope, sandbox and one-attempt limit. Neither this report, a fake receipt, a matching expected output, account/model availability, nor a green CI check supplies that authorization. No automatic retry, task finalization, review approval, publication or deployment is implied.
+
 # Orchestrator Phase 48b–48c Readiness Report
 
 ## Supplemental readiness update after PR #76 (2026-10-23)

@@ -107,3 +107,26 @@ response should scheduler integration and 2/5 real workers be considered.
 - [Windows sandbox and explicit MXC](https://learn.chatgpt.com/docs/windows/windows-sandbox)
 
 No raw MCP/config/account response or local source map belongs in Git/CI logs.
+
+## PR #85 follow-up: tool-event audit
+
+The single-turn pilot now audits versioned item and notification categories,
+including events buffered before the turn acknowledgement and events drained
+after the terminal notification. Action-bearing and unknown categories prevent
+`clean_tool_free_pilot`; server-initiated requests are quarantined. The receipt
+stores counts from fixed labels, never raw tool payloads or unknown type names.
+The CLI and read-only inspector do not treat a matching answer as a clean pilot
+when audit evidence is missing, contradictory or reports tool activity.
+
+This observation is retrospective and depends on the events actually emitted
+by the local process. It neither prevents tool execution nor independently
+attests a complete stream, a sandbox implementation or same-user isolation.
+An uncertain send still requires human review and is never automatically retried.
+
+On 27 October 2026 the visible native binary reported the same version string
+as the earlier capture but SHA-256
+`1103e9e09c71fa2cd0afd6d8f3b9a2d63174fe8eefd7cb5bd09f1cb14ef58a098`;
+the earlier schema manifest is bound to `c6144bc19b2705f25a40d8488b3d57d17a223c5df3c5f65e3c58d72601956c1e`.
+Version-string equality does not resolve this mismatch. A future preflight must
+use a newly captured, verified bundle for the current binary; this observation
+does not demonstrate an account, model or live turn on the new binary.
