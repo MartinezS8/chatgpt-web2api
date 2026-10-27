@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import hashlib
 
-AUDIT_VERSION = 1
+AUDIT_VERSION = 2
 AUDIT_SCOPE = "observed_app_server_events_only"
 TURN_START_REQUEST_ID = 3
 EXPECTED_OUTPUT = "ORCH_TEST_OK"
@@ -34,7 +34,9 @@ ACTION_NOTIFICATIONS = {
     "serverRequest/resolved": "server_request",
 }
 NOTIFICATION_CATEGORIES = frozenset(ACTION_NOTIFICATIONS.values()) | frozenset({
-    "unknown", "malformed_item", "late_item", "server_request",
+    "unknown", "malformed_item", "late_item", "late_notification",
+    "item_lifecycle", "item_snapshot", "uncorrelated_notification",
+    "ambiguous_final_answer", "server_request",
 })
 
 
@@ -65,6 +67,7 @@ def result_audit_is_consistent(result: dict) -> bool:
             or result["tool_event_audit_version"] != AUDIT_VERSION
             or result.get("tool_event_audit_complete") is not True
             or result.get("tool_event_audit_scope") != AUDIT_SCOPE
+            or type(result.get("item_lifecycle_consistent")) is not bool
             or type(result.get("turn_start_request_id")) is not int
             or result["turn_start_request_id"] != TURN_START_REQUEST_ID
             or result.get("expected_output") != EXPECTED_OUTPUT
@@ -88,11 +91,18 @@ def result_audit_is_consistent(result: dict) -> bool:
         return False
     if result["assistant_message_observed"] and not items.get("agentMessage"):
         return False
+    lifecycle_bad = any(
+        key in notifications
+        for key in ("item_lifecycle", "item_snapshot", "uncorrelated_notification")
+    )
+    if result["item_lifecycle_consistent"] is lifecycle_bad:
+        return False
     found = bool(notifications) or any(name not in SAFE_ITEM_TYPES for name in items)
     clean = (
         result.get("turn_terminal_status") == "completed"
         and result.get("assistant_message_observed") is True
         and result.get("assistant_output_matches_expected") is True
         and not unexpected
+        and result["item_lifecycle_consistent"] is True
     )
     return unexpected is found and result["clean_tool_free_pilot"] is clean

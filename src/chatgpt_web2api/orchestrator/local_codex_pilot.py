@@ -57,9 +57,16 @@ class _OneTurnWire:
         self._frames_seen = 0
         self._turn_start_attempts = 0
         self._final_answers: list[str] = []
+        # Ephemeral hash comparison only; never write arbitrary output bytes
+        # or their digest to the normal result/quarantine receipt.
+        self._final_item_hashes: dict[str, str] = {}
         self._item_type_counts: dict[str, int] = {}
         self._unsafe_notification_counts: dict[str, int] = {}
         self._unexpected_tool_activity = False
+        # Tracks notification lifecycle per ID without retaining raw item payload.
+        self._item_states: dict[str, tuple[str, str]] = {}
+        self._snapshot_items: dict[str, str] = {}
+        self._lifecycle_consistent = True
         threading.Thread(target=self._pump, daemon=True).start()
 
     def _record_unsafe_notification(self, category: str) -> None:
@@ -68,24 +75,72 @@ class _OneTurnWire:
             self._unsafe_notification_counts.get(category, 0) + 1
         )
 
-    def _audit_item(self, item: object) -> None:
+    def _mark_lifecycle_problem(self, category: str = "item_lifecycle") -> None:
+        self._lifecycle_consistent = False
+        self._record_unsafe_notification(category)
+
+    def _audit_item(self, item: object, *, event: str | None = None) -> None:
         if not isinstance(item, dict):
             self._record_unsafe_notification("malformed_item")
             raise RuntimeError("turn item must be an object")
-        item_type = item.get("type")
+        item_type, item_id = item.get("type"), item.get("id")
         known = SAFE_ITEM_TYPES | ACTION_ITEM_TYPES
         category = item_type if isinstance(item_type, str) and item_type in known else "unknown"
         self._item_type_counts[category] = self._item_type_counts.get(category, 0) + 1
         if category not in SAFE_ITEM_TYPES:
             self._unexpected_tool_activity = True
+        if type(item_id) is not str or not item_id or len(item_id) > 256:
+            self._record_unsafe_notification("malformed_item")
+            raise RuntimeError("turn item must have a bounded nonempty id")
+        if event == "item/started":
+            if item_id in self._item_states or len(self._item_states) >= 512:
+                self._mark_lifecycle_problem()
+            else:
+                self._item_states[item_id] = (category, "started")
+        elif event == "item/completed":
+            if self._item_states.get(item_id) != (category, "started"):
+                self._mark_lifecycle_problem()
+            else:
+                self._item_states[item_id] = (category, "completed")
 
-    def _audit_turn_items(self, turn: dict) -> None:
+    def _audit_turn_items(self, turn: dict, *, terminal: bool = False) -> None:
         items = turn.get("items")
         if not isinstance(items, list) or len(items) > 512:
             self._record_unsafe_notification("malformed_item")
             raise RuntimeError("turn items must be a bounded list")
+        snapshot: dict[str, str] = {}
         for item in items:
             self._audit_item(item)
+            key = item["id"]
+            category = item.get("type")
+            if key in snapshot:
+                self._mark_lifecycle_problem("item_snapshot")
+            snapshot[key] = category
+            if key in self._item_states and self._item_states[key][0] != category:
+                self._mark_lifecycle_problem("item_snapshot")
+            if key in self._snapshot_items and self._snapshot_items[key] != category:
+                self._mark_lifecycle_problem("item_snapshot")
+            self._snapshot_items[key] = category
+        if terminal:
+            for item in items:
+                if (item.get("type") == "agentMessage"
+                        and item["id"] in self._final_item_hashes):
+                    body = item.get("text")
+                    expected_hash = self._final_item_hashes[item["id"]]
+                    if (item.get("phase") not in (None, "final_answer")
+                            or type(body) is not str or len(body) > 8192
+                            or hashlib.sha256(body.encode("utf-8")).hexdigest()
+                            != expected_hash):
+                        self._mark_lifecycle_problem("item_snapshot")
+            # Completed turn snapshots are authoritative for this observed
+            # stream; otherwise a missing final item could yield false CLEAN.
+            states = {key: typ for key, (typ, status) in self._item_states.items()
+                      if status == "completed"}
+            if (states != snapshot or any(
+                    status != "completed" for _, status in self._item_states.values())
+                    or any(snapshot.get(k) != v
+                           for k, v in self._snapshot_items.items())):
+                self._mark_lifecycle_problem("item_snapshot")
 
     def audit_receipt(self, *, complete: bool) -> dict:
         return {
@@ -95,6 +150,7 @@ class _OneTurnWire:
             "observed_item_type_counts": dict(self._item_type_counts),
             "unexpected_notification_counts": dict(self._unsafe_notification_counts),
             "unexpected_tool_activity_observed": self._unexpected_tool_activity,
+            "item_lifecycle_consistent": self._lifecycle_consistent,
         }
 
     def _pump(self):
@@ -221,6 +277,8 @@ class _OneTurnWire:
                     raise RuntimeError("app-server did not stop after terminal event") from None
                 if exit_code != 0:
                     raise RuntimeError("app-server failed after terminal event")
+                if len(self._final_answers) > 1:
+                    self._record_unsafe_notification("ambiguous_final_answer")
                 return terminal_status, (self._final_answers[-1] if self._final_answers else None)
             if "id" in message:
                 raise RuntimeError("unexpected extra app-server RPC result")
@@ -228,8 +286,30 @@ class _OneTurnWire:
             if method == "model/rerouted":
                 raise RuntimeError("model rerouting is not accepted by the pinned pilot")
             params = message.get("params")
+            if terminal_status is not None and method != "turn/completed":
+                self._record_unsafe_notification("late_notification")
             if method in SAFE_NOTIFICATIONS and not isinstance(params, dict):
                 raise RuntimeError("malformed notification")
+            if method in SAFE_NOTIFICATIONS and isinstance(params, dict):
+                if method == "thread/started":
+                    nested_thread = params.get("thread")
+                    if (not isinstance(nested_thread, dict)
+                            or nested_thread.get("id") != thread_id):
+                        self._mark_lifecycle_problem("uncorrelated_notification")
+                elif method.startswith("thread/"):
+                    if params.get("threadId") != thread_id:
+                        self._mark_lifecycle_problem("uncorrelated_notification")
+                elif method != "turn/started" and (
+                        params.get("threadId") != thread_id
+                        or params.get("turnId") != turn_id):
+                    self._mark_lifecycle_problem("uncorrelated_notification")
+                if method.startswith("item/") and method not in {
+                    "item/started", "item/completed",
+                }:
+                    item_id = params.get("itemId")
+                    if (type(item_id) is not str or
+                            item_id not in self._item_states):
+                        self._mark_lifecycle_problem("uncorrelated_notification")
             if isinstance(params, dict) and not method.startswith(("turn/", "item/")):
                 if (params.get("threadId") not in (None, thread_id)
                         or params.get("turnId") not in (None, turn_id)):
@@ -245,7 +325,9 @@ class _OneTurnWire:
                 if params.get("turnId") != turn_id:
                     raise RuntimeError("item notification belongs to another turn")
                 item = params.get("item")
-                self._audit_item(item)
+                self._audit_item(item, event=method)
+                if not started_seen:
+                    self._mark_lifecycle_problem()
                 if terminal_status is not None:
                     self._record_unsafe_notification("late_item")
                 if (terminal_status is None and method == "item/completed"
@@ -257,6 +339,9 @@ class _OneTurnWire:
                         if len(self._final_answers) >= 8:
                             raise RuntimeError("excessive final agent messages")
                         self._final_answers.append(text)
+                        self._final_item_hashes[item["id"]] = hashlib.sha256(
+                            text.encode("utf-8")
+                        ).hexdigest()
             if method != "turn/completed":
                 if method not in SAFE_NOTIFICATIONS and method not in {
                     "item/started", "item/completed",
@@ -293,13 +378,14 @@ class _OneTurnWire:
                     self._record_unsafe_notification("unknown")
                 raise RuntimeError("duplicate turn completion")
             if (not isinstance(params, dict) or params.get("threadId") != thread_id
+                    or params.get("turnId", turn_id) != turn_id
                     or not isinstance(turn, dict) or turn.get("id") != turn_id
                     or turn.get("status") not in {"completed", "failed", "interrupted"}):
                 raise RuntimeError("unmatched or malformed turn completion")
             if (not started_seen or (turn["status"] == "completed"
                                      and turn.get("error") is not None)):
                 raise RuntimeError("turn completion status is inconsistent")
-            self._audit_turn_items(turn)
+            self._audit_turn_items(turn, terminal=True)
             terminal_status = turn["status"]
             if acknowledged_status != "inProgress" and acknowledged_status != terminal_status:
                 raise RuntimeError("turn acknowledgement and terminal status differ")
@@ -533,7 +619,9 @@ def run_one_local_pilot(
             "assistant_output_preview": EXPECTED_OUTPUT if answer_matches else None,
             "expected_output": EXPECTED_OUTPUT,
             "assistant_output_matches_expected": answer_matches,
-            "clean_tool_free_pilot": answer_matches and not audit["unexpected_tool_activity_observed"],
+            "clean_tool_free_pilot": (answer_matches and
+                                      not audit["unexpected_tool_activity_observed"] and
+                                      audit["item_lifecycle_consistent"]),
             **audit,
             "content_verified_by_operator": False,
         }

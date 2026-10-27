@@ -1,3 +1,15 @@
+## 2026-10-27 – PR #87 Audit-v2-Follow-up (cumulative Draft, no live test)
+
+This update is planned against PR #86 HEAD `1d31fd8d2df6bce1c8bf2e9ba14bb2782499b344`. It addresses review
+findings about duplicate/incomplete item lifecycles, mismatched terminal items,
+uncorrelated safe notifications and notifications observed after the terminal
+event. It adds a versioned audit consistency flag and synthetic negative
+regression cases, without claiming a real app-server or Windows isolation
+test. PR #86 HEAD and its verified hosted CI run 40497336431 are historical
+evidence for that precise SHA only. A new exact-head hosted CI is required
+before declaring this descendant green. `master` is unchanged; no merge,
+live provider call, reauthorization, real turn or finalization is implied.
+
 # Current assessment – PR #86 / Phase 48b follow-up (2026-10-27)
 
 This section supersedes earlier readiness snapshots below where they describe an older PR, Codex version, schema bundle, or test count. Historical entries remain for audit context and must not be read as current evidence.
